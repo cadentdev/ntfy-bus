@@ -1,0 +1,30 @@
+# systemd/ntfy-poll.service — Linux scheduler (oneshot) for the durable bus
+# capture (daemons/ntfy-poll-to-jsonl.sh). Paired with ntfy-poll.timer, this is
+# the Linux counterpart to launchd/ntfy-poll.plist.example and the poll-based
+# writer that the follower daemon (bus-waker.service) waits on — closing the
+# receive-path gap on hosts without the LifeOS systemd watcher.
+#
+# Install (per identity — set AGENT + REPO to match this host's config):
+#   cp <this file>  ~/.config/systemd/user/ntfy-poll.service
+#   cp ntfy-poll.timer ~/.config/systemd/user/ntfy-poll.timer
+#   # edit the two Environment= lines below, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ntfy-poll.timer
+#   loginctl enable-linger $USER      # keep capturing across logout / at boot
+#
+# For MULTIPLE identities on one host, install instance copies
+# (ntfy-poll@cindy.service etc.) or one plain pair per identity with distinct
+# Environment= values; each identity's config sets its own .inbox_jsonl path.
+#
+# PATH DOCTRINE: ExecStart uses the STABLE skill path; never a plugin cache.
+
+[Unit]
+Description=ntfy-bus durable CAPTURE — poll the bus and append new messages to the JSONL inbox
+
+[Service]
+Type=oneshot
+# NTFY_POLL_REPO selects which repo's identity to poll as; EXPECT_AGENT refuses
+# to run as any other identity (shared-$HOME guard). Edit both for this host.
+Environment=NTFY_POLL_REPO=%h/Repos/CHANGE/ME
+Environment=EXPECT_AGENT=changeme
+ExecStart=%h/.claude/skills/ntfy-bus/daemons/ntfy-poll-to-jsonl.sh

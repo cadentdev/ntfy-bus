@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd/bus-waker.plist.example — macOS runner for the canonical bus waker
+  daemon (daemons/bus-waker-daemon.sh). This is the macOS counterpart to the
+  Linux systemd/bus-waker.service; the mapping is:
+
+    Type=simple + Restart=always  ⇒  RunAtLoad + KeepAlive
+    ExecStart                     ⇒  ProgramArguments
+    journalctl --user -u ...      ⇒  StandardOut/ErrorPath log file
+
+  INSTALL — substitute the __PLACEHOLDERS__ below, then:
+    cp <edited copy> ~/Library/LaunchAgents/__LABEL__.bus-waker.__AGENT__.plist
+    launchctl load  ~/Library/LaunchAgents/__LABEL__.bus-waker.__AGENT__.plist
+    launchctl list | grep bus-waker          # confirm it registered
+
+  The daemon fails LOUD if the resolved config is missing any required state
+  path (inbox_jsonl, waker.pidfile, waker.wakelog, waker.seen_ids). With
+  KeepAlive, a config gap means launchd respawns a crash-looping job every
+  ThrottleInterval — check the log file first if `launchctl list` shows a
+  nonzero last-exit status.
+
+  SUBSTITUTIONS (launchd cannot expand ~ or env vars in paths — use absolutes):
+    __AGENT__  lowercase agent_id, e.g. "alice" (one plist per identity on a
+               shared-$HOME host)
+    __HOME__   absolute home dir, e.g. /Users/yourname
+    __LABEL__  reverse-DNS label prefix, default "local". Use one prefix per
+               host so an identity is never scheduled twice under two labels.
+    __REPO__   (repo-local identity only) absolute path to the repo whose
+               config carries this identity — see IDENTITY below.
+
+  IDENTITY — WHICH CONFIG THE DAEMON READS: identity comes ENTIRELY from the
+  config that lib/resolve-config.sh resolves.
+    - Host-global identity (the common case): delete the CLAUDE_PROJECT_DIR
+      block below; the daemon reads ~/.claude/ntfy-bus.config.json.
+    - Repo-local identity (multi-identity host, per_repo_identity_allowed):
+      keep CLAUDE_PROJECT_DIR pointing at the repo whose
+      .claude/ntfy-bus.config.json carries this identity AND its waker block.
+      That config must carry the waker block — resolution hands the daemon
+      the repo-local file, and the daemon fails loud if the block is absent.
+
+  PATH DOCTRINE (mirrors systemd/bus-waker.service): ProgramArguments points at
+  the STABLE skill path (~/.claude/skills/ntfy-bus/...) that clone/symlink
+  installs provide. NEVER point it into a plugin cache — that path changes on
+  every plugin update.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__.bus-waker.__AGENT__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.claude/skills/ntfy-bus/daemons/bus-waker-daemon.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string>
+        <!-- Repo-local identity ONLY — delete this key for host-global
+             identity. resolve-config.sh reads CLAUDE_PROJECT_DIR to find the
+             repo-local config; this is what makes the daemon run as that
+             repo's agent instead of the host-global one. -->
+        <key>CLAUDE_PROJECT_DIR</key>
+        <string>__REPO__</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.local/state/bus-waker.__AGENT__.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.local/state/bus-waker.__AGENT__.launchd.log</string>
+</dict>
+</plist>

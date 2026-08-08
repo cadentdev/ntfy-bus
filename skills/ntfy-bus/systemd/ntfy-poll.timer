@@ -1,0 +1,15 @@
+# systemd/ntfy-poll.timer — fires ntfy-poll.service every 2 minutes.
+# See ntfy-poll.service for the full install sequence.
+
+[Unit]
+Description=Run the ntfy-bus durable capture every 2 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+# Catch up one missed run after the host was asleep/off, rather than waiting a
+# full interval.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

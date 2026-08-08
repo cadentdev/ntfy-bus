@@ -1,0 +1,32 @@
+{
+  "agent_id": "REPLACE_WITH_AGENT_ID",
+  "endpoint": "https://ntfy.example.com",
+  "topic": "agent-bus",
+  "auth_env": {
+    "username": "NTFY_USERNAME",
+    "password": "NTFY_PASSWORD"
+  },
+  "recipient_filters": ["REPLACE_WITH_AGENT_ID", "ALL"],
+  "inbox_jsonl": "~/.claude/ntfy-inbox.jsonl",
+  "per_repo_identity_allowed": false,
+
+  "waker": {
+    "mode": "auto",
+    "systemd_unit": "bus-waker.service",
+    "pidfile": "~/.claude/ntfy-bus.waker.pid",
+    "cmdline_match": "bus-waker-daemon",
+    "noise_senders": "gate|uptime|backup|nightly|cron|mirror|ansible|nocodb|bot|kuma",
+    "startup_tail": 200,
+    "wakelog": "~/.claude/ntfy-bus.wake.log",
+    "seen_ids": "~/.claude/ntfy-bus.seen-ids",
+    "notify_hook": ""
+  },
+
+  "statusline": {
+    "enabled": true,
+    "label": "BUS",
+    "icon_armed": "⏻",
+    "icon_down": "⏚",
+    "show_when_down": true
+  }
+}

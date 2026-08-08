@@ -1,0 +1,11 @@
+{
+  "agent_id": "REPLACE_WITH_REPO_AGENT_ID",
+  "endpoint": "https://ntfy.example.com",
+  "topic": "agent-bus",
+  "auth_env": {
+    "username": "NTFY_USERNAME",
+    "password": "NTFY_PASSWORD"
+  },
+  "recipient_filters": ["REPLACE_WITH_REPO_AGENT_ID", "ALL"],
+  "inbox_jsonl": ""
+}

@@ -1,0 +1,29 @@
+# systemd/bus-waker.service — TEMPLATE for the canonical bus waker daemon.
+#
+# Install (systemd hosts):
+#   cp <this file> ~/.config/systemd/user/bus-waker.service
+#   systemctl --user daemon-reload && systemctl --user enable --now bus-waker.service
+#   loginctl enable-linger $USER   # survive logout, start at boot
+#
+# PATH DOCTRINE: ExecStart points at the STABLE host path
+# (~/.claude/skills/ntfy-bus/...), which symlink/clone installs provide.
+# Plugin installs are COPIED to a versioned cache whose path changes on every
+# update — NEVER point ExecStart into a plugin cache. On plugin-installed
+# hosts, copy the daemon to a stable home first (see README "Waker daemon").
+#
+# The watcher dependency is soft (Wants=): on hosts without
+# ntfy-bridge-watcher.service the daemon simply waits for the inbox file.
+
+[Unit]
+Description=ntfy-bus WAKER — follows the JSONL inbox, filters to this agent, logs wakes + notify hook
+Wants=ntfy-bridge-watcher.service
+After=ntfy-bridge-watcher.service
+
+[Service]
+Type=simple
+ExecStart=%h/.claude/skills/ntfy-bus/daemons/bus-waker-daemon.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

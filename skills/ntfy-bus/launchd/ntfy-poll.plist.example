@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd/ntfy-poll.plist.example — macOS scheduler for the durable bus capture
+  (daemons/ntfy-poll-to-jsonl.sh). This is the macOS counterpart to the Linux
+  systemd/ntfy-poll.{service,timer}. It closes the receive-path gap on
+  vanilla macOS hosts: launchd runs the poller every 120s, which writes the
+  inbox JSONL that the waker (daemons/ntfy-bus-waker.sh) tails.
+
+  WHY launchd, not cron: on macOS, cron needs Full Disk Access and fails
+  SILENTLY without it. launchd LaunchAgents run reliably per-user.
+
+  INSTALL — prefer bin/ntfy-poll-install.sh, which renders this file, refuses
+  to double-schedule an identity, and validates the result before loading. By
+  hand: substitute the four __PLACEHOLDERS__ below, then:
+    cp <edited copy> ~/Library/LaunchAgents/__LABEL__.ntfy-poll.__AGENT__.plist
+    launchctl load  ~/Library/LaunchAgents/__LABEL__.ntfy-poll.__AGENT__.plist
+    launchctl list | grep ntfy-poll          # confirm it registered
+
+  SUBSTITUTIONS (launchd cannot expand ~ or env vars in paths — use absolutes):
+    __AGENT__  lowercase agent_id, e.g. "cindy" (one plist per identity on a
+               shared-$HOME host; each writes its own ntfy-inbox.<agent>.jsonl)
+    __HOME__   absolute home dir, e.g. /Users/yourname
+    __REPO__   absolute path to the repo whose ntfy-bus config carries this
+               identity, e.g. /Users/yourname/Repos/you/your-repo
+    __LABEL__  reverse-DNS label prefix, default "local". A host that already
+               runs units under another prefix should pass its own so one
+               identity never ends up scheduled twice under two labels —
+               launchd would happily run both, and two pollers writing one
+               inbox is the interleaved-lines corruption the poller header
+               warns about. The prefix is cosmetic to launchd and load-bearing
+               to humans: it is how you recognise your own units.
+
+  PATH DOCTRINE (mirrors systemd/bus-waker.service): ProgramArguments points at
+  the STABLE skill path (~/.claude/skills/ntfy-bus/...) that clone/symlink
+  installs provide. NEVER point it into a plugin cache — that path changes on
+  every plugin update.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__.ntfy-poll.__AGENT__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/.claude/skills/ntfy-bus/daemons/ntfy-poll-to-jsonl.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin</string>
+        <!-- NTFY_POLL_REPO selects which repo's identity to poll as. -->
+        <key>NTFY_POLL_REPO</key>
+        <string>__REPO__</string>
+        <!-- EXPECT_AGENT: refuse to run as any other identity (shared-$HOME guard). -->
+        <key>EXPECT_AGENT</key>
+        <string>__AGENT__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.local/state/ntfy-poll.__AGENT__.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.local/state/ntfy-poll.__AGENT__.launchd.log</string>
+</dict>
+</plist>

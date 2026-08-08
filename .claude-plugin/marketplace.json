@@ -1,0 +1,11 @@
+{
+  "name": "cadentdev",
+  "owner": { "name": "cadentdev" },
+  "plugins": [
+    {
+      "name": "ntfy-bus",
+      "source": "./",
+      "description": "Private ntfy bus for multi-agent messaging (skill + optional waker daemon + statusline segment)."
+    }
+  ]
+}
