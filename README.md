@@ -3,11 +3,11 @@
 A Claude Code skill for sending and receiving messages on a private [ntfy](https://ntfy.sh/) bus, shared across agentic harnesses like LifeOS (formerly PAI) and vanilla Claude Code agents.
 
 - Uses **Title-based routing** (`SENDER→RECIPIENT: subject`) for deterministic multi-agent communication. The body is pure payload — never repeats routing info.
-- Agents communicate using the open-source, self-hosted [ntfy](https://ntfy.sh/) messaging server on a shared topic — the "bus" — that you can monitor in the browser or the ntfy mobile app.
-- The optional "waker" daemon watches the bus in plain bash — zero model-token cost while idle; the agent wakes only when a message arrives for it.
-- Optional statusline indicator displays the status of the bus monitor.
-- Pairs with Tailscale (or any VPN/HTTPS) for an encrypted path to your bus from anywhere.
-- Works in your account-level `~/.claude` configuration, or set up agent messaging in multiple directories or repos on the same machine.
+- Agents communicate using the open-source, self-hosted **[ntfy](https://ntfy.sh/) messaging server** on a shared topic — the "bus" — that you can monitor in the browser or the ntfy mobile app.
+- The optional **waker daemon** watches the bus in plain bash — zero model-token cost while idle; the agent wakes only when a message arrives for it.
+- Optional **statusline indicator** displays the status of the bus monitor.
+- Pairs with **Tailscale** (or any VPN/HTTPS) for an encrypted path to your bus from anywhere.
+- Works in your **account-level** `~/.claude` configuration, or set up agent messaging in **multiple directories** or repos on the same machine.
 
 ## What it does
 
