@@ -113,9 +113,15 @@ time, even on hosts that never run the daemon, costs nothing and means enabling
 the daemon later is just `systemctl --user enable --now`. A leading `~/` in any
 config path is expanded to `$HOME` by every consumer (`ntfy_expand_home`).
 
-On a host-global setup, the `agent_id` above IS the machine's identity. On a
-per-repo setup, it is the **fallback** identity used in repos that carry no
-config of their own.
+On a host-global setup, the `agent_id` above IS the machine's identity.
+
+On a per-repo (opt-in) setup it is **not** a fallback for config-less repos —
+there is no such fallback. Inside a repo with no `.claude/ntfy-bus.config.json`,
+identity resolves to NOTHING (`NTFY_IDENTITY_SOURCE=none`, empty `NTFY_CONFIG`)
+and every consumer refuses to act on the bus. The host-global `agent_id` is used
+only where there is no repo context at all — the systemd/launchd daemon, which
+sets no `WorkingDirectory` — so durable notification keeps working while nothing
+can ever send or wake as an agent the repo never named.
 
 ## Step 6: (Vanilla, per-repo only) Write the Repo-Local Identity + Wiring
 
@@ -124,7 +130,7 @@ config of their own.
 > be born on a LifeOS host. The read-time guard in `resolve-config.sh` would ignore
 > it anyway; this is the belt-and-suspenders write-time half.
 
-**6a. Tracked identity config** (travels with the repo — commit it):
+**6a. Untracked identity config** (per-contributor — never committed):
 
 ```bash
 cat > "${REPO_ROOT}/.claude/ntfy-bus.config.json" <<EOF
@@ -137,12 +143,28 @@ cat > "${REPO_ROOT}/.claude/ntfy-bus.config.json" <<EOF
     "password": "NTFY_PASSWORD"
   },
   "recipient_filters": ${REPO_RECIPIENT_FILTERS_JSON},
-  "inbox_jsonl": ""
+  "inbox_jsonl": "~/.claude/ntfy-inbox.$(echo "$REPO_AGENT_ID" | tr '[:upper:]' '[:lower:]').jsonl"
 }
 EOF
+
+IGN="${REPO_ROOT}/.gitignore"
+grep -qxF '.claude/ntfy-bus.config.json' "$IGN" 2>/dev/null \
+  || echo '.claude/ntfy-bus.config.json' >> "$IGN"
 ```
 
-This file carries NO secrets (creds are env-var *names*), so it is safe to track.
+**Do not commit this file**, and do not encourage anyone else to. It carries no
+secrets (creds are env-var *names*), but it does carry a live fleet **identity**:
+committing it hands that agent's name to everyone who clones the repo, and the
+first clone to run a workflow starts sending and arming wakers as that agent.
+Identity is per-contributor, not per-project. On a locked host the read-time
+guard would ignore a tracked config anyway — so committing it buys nothing and
+risks a hijack.
+
+`inbox_jsonl` must be a real path, not `""`. It is the one key that turns the
+wake path on: `daemons/ntfy-bus-waker.sh` fails loud on an empty value, and both
+the session pidfile (`${inbox%.jsonl}.waker.pid`) and the wake-private ledger
+(`${inbox%.jsonl}.wake-seen`) derive from it. A leading `~/` is expanded by
+`ntfy_expand_home`, so the value stays portable across hosts.
 
 **6b. Untracked hook wiring** (machine-specific bun path — never tracked):
 
