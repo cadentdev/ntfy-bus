@@ -103,5 +103,15 @@ for f in $RUNTIME; do
   [ -n "$h" ] && bad "state-file path built from home-anchored variable \$${hv} (move to config + fail loud): $(printf '%s' "$h" | tr '\n' ' ')"
 done
 
+# 7. no contributor's bus identity may be tracked in this repo. A committed
+# .claude/ntfy-bus.config.json ships a live fleet agent name to everyone who
+# clones, and the first clone to run a workflow sends and arms wakers AS that
+# agent. Identity is per-contributor, not per-project — it belongs in an
+# untracked file (.gitignore) on each machine. git ls-files is the authority
+# here, not .gitignore: an already-tracked file stays tracked no matter what
+# the ignore rules say afterwards.
+t=$(git -C "$REPO" ls-files -- '.claude/ntfy-bus.config.json' '*/.claude/ntfy-bus.config.json' 2>/dev/null)
+[ -n "$t" ] && bad "bus identity config is TRACKED (identity is per-contributor — untrack it: git rm --cached <file>): $(printf '%s' "$t" | tr '\n' ' ')"
+
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"
