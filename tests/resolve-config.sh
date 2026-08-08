@@ -62,9 +62,17 @@ jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$
   && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
 assert_eq "unlocked: repo-local preferred" "repo-local" "$(with_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
 assert_eq "unlocked: repo-local path" "$ROOT/fakerepo/.claude/ntfy-bus.config.json" "$(with_repo 'printf %s "$NTFY_CONFIG"')"
-# opt-in but no repo-local config present -> falls back to host-global
+# opt-in, IN a repo, but no repo-local config -> UNRESOLVED, never host-global.
+# Falling back here is the identity-hijack-by-omission this repo hit once.
 rm "$ROOT/fakerepo/.claude/ntfy-bus.config.json"
-assert_eq "unlocked, no repo config: fallback" "host-global" "$(with_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+assert_eq "unlocked, no repo config: unresolved" "none" "$(with_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+assert_eq "unlocked, no repo config: empty config path" "" "$(with_repo 'printf %s "$NTFY_CONFIG"')"
+# ...but OUTSIDE any repo (daemon context — bus-waker.service sets no
+# WorkingDirectory) host-global is still the answer, else durable notification
+# dies on every opt-in host.
+no_repo() { ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
+mkdir -p "$ROOT/norepo"
+assert_eq "unlocked, no repo context: host-global" "host-global" "$(no_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
 cleanup
 
 echo "L7: ntfy_expand_home"

@@ -2,7 +2,9 @@
 # lib/resolve-config.sh — shared identity-config resolver for all ntfy-bus workflows.
 #
 # Source this file, then use "$NTFY_CONFIG" as the config path. It also exports
-# NTFY_HOST_LOCKED (1/0) and NTFY_IDENTITY_SOURCE (host-global|repo-local).
+# NTFY_HOST_LOCKED (1/0) and NTFY_IDENTITY_SOURCE (host-global|repo-local|none).
+# Callers MUST treat an empty "$NTFY_CONFIG" (source "none") as unconfigured and
+# refuse to act on the bus — never substitute an identity of their own.
 #
 # Send, CheckInbox, Watch, and Setup ALL go through this one resolver — identity
 # resolution is never duplicated per-workflow.
@@ -20,8 +22,15 @@
 #
 #   VANILLA opt-in:     no ~/.claude/PAI/  AND the host-global config sets
 #                       per_repo_identity_allowed: true.
-#                       -> prefer the repo-local .claude/ntfy-bus.config.json,
-#                          fall back to the host-global config.
+#                       -> the repo-local .claude/ntfy-bus.config.json IS the
+#                          identity. A repo without one resolves to NOTHING
+#                          (source "none", empty NTFY_CONFIG) — there is no
+#                          host-global fallback inside a repo, because falling
+#                          back means acting as an agent this repo never named.
+#                          Outside any repo (daemon context: bus-waker.service
+#                          sets no WorkingDirectory) the host-global config is
+#                          used, which is the machine's own identity and cannot
+#                          mismatch a repo.
 #
 # Default-safe polarity: the secure state (locked) is the default; per-repo
 # identity is an explicit opt-in. A fresh, never-reconfigured host is locked.
@@ -88,7 +97,24 @@ ntfy_resolve_config() {
   if [ -n "$repo_cfg" ] && [ -f "$repo_cfg" ]; then
     NTFY_IDENTITY_SOURCE="repo-local"
     NTFY_CONFIG="$repo_cfg"
+  elif [ -n "$repo_root" ]; then
+    # In a repo, on a host that opted into per-repo identity, but this repo
+    # carries no identity: that is UNCONFIGURED, not "use the machine's agent".
+    # There is deliberately NO host-global fallback here — falling back silently
+    # arms and sends as whichever agent the host happens to own, which is an
+    # identity hijack by omission (the Cindy incident, 2026-08-08: a session in
+    # a config-less repo armed a waker as a live agent and began consuming that
+    # agent's wake ledger). Unresolved is loud and harmless; wrong is silent
+    # and not.
+    NTFY_IDENTITY_SOURCE="none"
+    NTFY_CONFIG=""
+    echo "ntfy resolve-config: opt-in host, but ${repo_root} has no .claude/ntfy-bus.config.json — identity UNRESOLVED (no host-global fallback by design). Run the Setup workflow to give this repo an identity." >&2
   else
+    # No repo context at all (systemd/launchd daemon, bare shell). The machine's
+    # own identity is the only meaningful answer here, and this path cannot
+    # produce the hijack above because there is no repo to mismatch against.
+    # bus-waker.service sets no WorkingDirectory, so this branch is what keeps
+    # durable notification alive on opt-in hosts.
     NTFY_IDENTITY_SOURCE="host-global"
     NTFY_CONFIG="$host_global"
   fi
