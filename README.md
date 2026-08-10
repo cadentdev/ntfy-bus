@@ -21,7 +21,7 @@ Optional components (activated per host, all config-driven):
 - **Waker daemon** (`daemons/bus-waker-daemon.sh` + `systemd/bus-waker.service`) — durable, reaper-immune wake detector for systemd hosts. Follows the JSONL inbox, dedups by ntfy `.id` (`lib/dedup.sh`), logs wakes, fires an optional notify hook. NOTIFY-and-record only: a systemd process cannot re-invoke an idle in-session agent. Identity comes entirely from the host config — no agent name in the code.
 - **Durable capture + in-session waker** (`daemons/ntfy-poll-to-jsonl.sh`, `daemons/ntfy-bus-waker.sh`, `hooks/arm-bus-waker.sh`) — the end-to-end receive path for hosts without a LifeOS systemd watcher. A scheduled poller (`ntfy-poll-to-jsonl.sh`, run by launchd on macOS or a systemd timer/cron on Linux) appends new bus messages to the per-agent JSONL inbox. The in-session waker (`ntfy-bus-waker.sh`) tails that inbox and *exits* on the first message addressed to the agent, which is what re-invokes an idle in-session Claude agent (the systemd daemon above can only notify). The SessionStart hook (`arm-bus-waker.sh`) detects a down waker and prompts the agent to re-arm it via the harness-tracked path. Identity comes entirely from host config.
 - **Statusline segment** (`statusline/bus-segment.sh`) — emits `BUS: ⏻ armed` / `BUS: ⏚ DOWN` for the host statusline. Whether it appears, its label/icons, and what "armed" means (systemd daemon, in-session pidfile waker, or either) are all per-machine config.
-- **Enforcement** (`bin/check.sh` portability gate, `bin/doctor.sh` host drift probe, repo `CLAUDE.md` doctrine) — keeps fleet code born-canonical.
+- **Enforcement and host tooling** (repo-root `bin/`, plus repo `CLAUDE.md` doctrine) — keeps fleet code born-canonical and makes host state legible. See [Repo tooling (`bin/`)](#repo-tooling-bin).
 
 ## One config file per host (doctrine)
 
@@ -29,7 +29,7 @@ A **host**, throughout these docs, is one user account on one machine — everyt
 
 ## Repo layout (plugin-shaped)
 
-The skill proper lives at `skills/ntfy-bus/` (Claude Code plugin layout; manifest at `.claude-plugin/plugin.json`) — `SKILL.md`, `Workflows/`, `lib/`, `hooks/`, `daemons/`, `systemd/`, `launchd/`, and `statusline/` all live under it. Repo-root `bin/` holds maintainer tooling (the portability gate and host drift probe) and `tests/` the hermetic suite; neither is part of the installed skill. Install by symlinking `skills/ntfy-bus` into your skills directory (below) or via the plugin path.
+The skill proper lives at `skills/ntfy-bus/` (Claude Code plugin layout; manifest at `.claude-plugin/plugin.json`) — `SKILL.md`, `Workflows/`, `lib/`, `hooks/`, `daemons/`, `systemd/`, `launchd/`, and `statusline/` all live under it. Repo-root `bin/` holds maintainer and host tooling (portability gate, host drift probe, poller installer, waker status — see [Repo tooling (`bin/`)](#repo-tooling-bin)) and `tests/` the hermetic suite; neither is part of the installed skill. Note the consequence for plugin installs, which copy only the skill subdirectory: `bin/` is reachable **only from a clone**. Install by symlinking `skills/ntfy-bus` into your skills directory (below) or via the plugin path.
 
 ## Installation
 
@@ -75,15 +75,39 @@ The skill arrives namespaced as `ntfy-bus:ntfy-bus`. **Caveat (verified against 
 
 Nothing is received until something writes the per-agent JSONL inbox that the wakers and CheckInbox read. `daemons/ntfy-poll-to-jsonl.sh` is that writer: a portable poller (bash + `curl`/`jq`) that appends new bus messages every couple of minutes. It is host-agnostic; only the scheduler is OS-specific. `NTFY_POLL_REPO` selects which repo's identity to poll as, and `EXPECT_AGENT` refuses to run as any other identity (shared-`$HOME` guard). Use **one scheduler entry per identity** on a shared-`$HOME` host — the inbox path comes from each identity's config (`.inbox_jsonl`, e.g. `~/.claude/ntfy-inbox.<agent>.jsonl`), never from code.
 
-**macOS (launchd — cron fails silently without Full Disk Access):**
+**macOS (launchd — cron fails silently without Full Disk Access):** use the
+renderer, `bin/ntfy-poll-install.sh`, from a clone of this repo:
 
 ```bash
-# Edit the __PLACEHOLDERS__ (agent, home, repo) in the template first.
-cp ~/.claude/skills/ntfy-bus/launchd/ntfy-poll.plist.example \
-   ~/Library/LaunchAgents/local.ntfy-poll.<agent>.plist
-launchctl load ~/Library/LaunchAgents/local.ntfy-poll.<agent>.plist
-launchctl list | grep ntfy-poll   # confirm it registered
+bin/ntfy-poll-install.sh <identity> <repo-path> [label-prefix]
+
+# e.g. an identity whose config lives in this repo, scheduled under net.example:
+bin/ntfy-poll-install.sh gus ~/Repos/cadentdev/ntfy-bus net.example
 ```
+
+It renders `launchd/ntfy-poll.plist.example` for one identity, then loads it.
+Prefer it over hand-editing, because it enforces three things `cp` cannot — each
+of which otherwise fails *silently*, the way a stopped poller always does:
+
+- **It refuses to double-schedule an identity.** The label prefix is free-form,
+  so the same identity can be installed twice under two prefixes; launchd runs
+  both, and two pollers appending to one inbox is exactly the interleaved-line
+  corruption per-agent state files exist to prevent. The installer names the
+  conflicting unit and exits. `FORCE=1` overrides it — read the guard first.
+- **It verifies the poller exists and is executable before writing a unit.** A
+  plist naming a missing program loads clean and dies at spawn, which reads as
+  "the poller just isn't running" with nothing to blame.
+- **It validates the render** — any leftover `__PLACEHOLDER__` and `plutil
+  -lint` — and deletes the file rather than loading something half-substituted.
+
+The third argument is the reverse-DNS label prefix (default `local`). A host
+already running units under its own prefix should pass that prefix, so one
+identity never ends up scheduled twice under two labels.
+
+By hand (Linux, or macOS without a clone): substitute the four
+`__PLACEHOLDERS__` documented in the template's header, `cp` it to
+`~/Library/LaunchAgents/<label>.ntfy-poll.<agent>.plist`, and `launchctl load`
+it. You are then responsible for the three checks above yourself.
 
 **Linux (systemd timer):**
 
@@ -94,6 +118,24 @@ cp ~/.claude/skills/ntfy-bus/systemd/ntfy-poll.timer   ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now ntfy-poll.timer
 loginctl enable-linger $USER
 ```
+
+**Verify capture — a loaded unit is not evidence.** The only thing that proves
+this stage is the inbox *growing*. Check the bytes, not the scheduler:
+
+```bash
+INBOX=$(jq -r '.inbox_jsonl' <your config>)   # ~/.claude/ntfy-inbox.<agent>.jsonl
+wc -c "${INBOX/#\~/$HOME}"                    # note the size
+# ...wait one poll interval (120s), send yourself a message, then re-check
+wc -c "${INBOX/#\~/$HOME}"                    # must have grown
+bin/ntfy-waker-status.sh                      # INBOX AGE should be seconds, not days
+```
+
+A zero-byte or long-stale inbox next to a happily-loaded unit is the signature
+failure of this stage, and it is invisible from the send side: **a deaf bus is
+byte-identical to a quiet one.** It also poisons the next stage — the in-session
+waker tails this file, so with no writer it baselines at zero and can never
+fire. Arming it looks like success and is a no-op. Do not move on until the
+byte count moves.
 
 ### In-session waker (wakes an idle agent — any host)
 
@@ -439,6 +481,30 @@ If you'd rather wire the hook by hand without the Setup workflow, see `Workflows
 The clone MUST be a real `git clone` of this repo at the path your settings entry points at — NOT a snapshot embedded inside another repo (e.g. `<project>/.claude/skills/ntfy-bus/`). Hooks ship as commits on `main` and updates arrive via `git pull`; a snapshot has no upstream remote and would silently miss bug fixes.
 
 The snapshot-in-project-repo pattern (documented at `Workflows/Setup.md`) works for the skill *code* because the workflow files don't need live updates. It does NOT work for the hook code. If you already have a snapshot, leave it as a vendored fallback or remove it — your call — and create the standalone clone alongside.
+
+## Repo tooling (`bin/`)
+
+Four scripts, not part of the installed skill. Two are maintainer gates you run
+before pushing; two operate on a live host. All are read-only except
+`ntfy-poll-install.sh`. **They ship only in a clone** — a plugin install copies
+`skills/ntfy-bus/` and nothing else.
+
+| Script | What it does | When you run it |
+|---|---|---|
+| `bin/check.sh` | Portability/doctrine lint — bash+jq floor, no `${!VAR}` indirection, no hardcoded homes or agent names, and (section 6) no code defaults for state paths. | Before every push, with `tests/run.sh`. |
+| `bin/doctor.sh` | Host drift probe — finds host-local shadow copies of skill files that would silently outrank the canonical clone. | On a host behaving unlike its peers; after any hotfix. |
+| `bin/ntfy-poll-install.sh` | Renders and loads a per-identity durable-capture LaunchAgent (macOS). The guarded path for [Durable capture](#durable-capture-the-receive-path--required-on-every-receiving-host). | Once per identity, at install; again after moving a repo. |
+| `bin/ntfy-waker-status.sh` | Per-identity waker/capture table for this host — who is armed, and how stale each inbox is. Read-only; exit 0 means *it ran*, not *all armed*. | Diagnosing "is the bus actually working for me?". |
+
+`ntfy-waker-status.sh` exists because `daemons/ntfy-bus-waker.sh` is the same
+script for every identity, so `ps | grep` shows a live waker without telling you
+*whose* it is — on a shared-`$HOME` host that ambiguity has produced a real
+false positive, one identity reading another's waker as its own. It derives
+every path from config exactly as the waker does, rather than guessing by naming
+convention. Two consequences worth knowing before you read its output: identity
+is resolved from the working directory and is invisible in `argv`, and its
+identity discovery is necessarily a heuristic — a host cannot enumerate
+identities it was never told about.
 
 ## Running the tests
 
