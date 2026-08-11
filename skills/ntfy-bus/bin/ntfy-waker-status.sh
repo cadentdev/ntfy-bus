@@ -1,5 +1,6 @@
 #!/bin/bash
-# bin/ntfy-waker-status.sh — which identities have a waker armed on this host,
+# skills/ntfy-bus/bin/ntfy-waker-status.sh — which identities have a waker armed
+# on this host,
 # right now, in one command. Read-only; exit 0 = ran, not "all armed".
 #
 # WHY THIS EXISTS: daemons/ntfy-bus-waker.sh is the same script for every
@@ -66,10 +67,14 @@ bus_resolve() {
   done
   printf '%s/%s' "$(cd -P "$(dirname "$t")" && pwd -P)" "$(basename "$t")"
 }
-REPO=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
+# Anchor to the SKILL dir (this script's parent), never to a repo root: the
+# skill is the unit that ships, and under a plugin install there is no repo
+# above it. Resolving via ../.. was why this tool was reachable only from a
+# clone (issue #17).
+SKILL_DIR=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
 
 # shellcheck source=skills/ntfy-bus/lib/resolve-config.sh
-. "$REPO/skills/ntfy-bus/lib/resolve-config.sh"
+. "$SKILL_DIR/lib/resolve-config.sh"
 
 [ -f "${NTFY_CONFIG:-}" ] || {
   echo "FATAL: config missing/unresolved at ${NTFY_CONFIG:-unresolved} — run the Setup workflow" >&2
@@ -142,7 +147,7 @@ if [ -n "$ME" ]; then
     echo "  inspect it before arming anything."
   else
     echo "This repo's identity ($ME): NOT ARMED"
-    echo "  arm it: bash \"$REPO/skills/ntfy-bus/daemons/ntfy-bus-waker.sh\"   (run in background, from this repo's cwd)"
+    echo "  arm it: bash \"$SKILL_DIR/daemons/ntfy-bus-waker.sh\"   (run in background, from this repo's cwd)"
   fi
   echo
 fi
