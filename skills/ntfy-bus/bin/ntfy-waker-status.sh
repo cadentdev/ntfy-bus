@@ -97,8 +97,14 @@ STATE_DIR=$(dirname "$INBOX")
 # changes with it — that coupling is the point.
 MY_PIDFILE="${INBOX%.jsonl}.waker.pid"
 
+# GNU FIRST, and the caller validates. BSD-first was wrong in a way the `||`
+# cannot catch: GNU `stat -f` is not a format flag, it means FILE SYSTEM status,
+# so it SUCCEEDS on Linux and prints a multi-line block. The fallback therefore
+# never fired and the block reached arithmetic context, where the bare word
+# `File` aborted the subshell under `set -u` (issue #4). BSD has no `-c` and
+# fails cleanly with exit 1, so this order is safe both ways — verified on both.
 mtime_epoch() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
 }
 
 human_age() {
@@ -201,7 +207,10 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
   age="no inbox"
   if [ -n "$inbox_stem" ] && [ -f "${inbox_stem}.jsonl" ]; then
     mt=$(mtime_epoch "${inbox_stem}.jsonl")
-    [ -n "$mt" ] && age="$(human_age $((now - mt))) ago"
+    # Numeric, not merely non-empty: the failure mode this guards was never
+    # "no output", it was confident output of the wrong KIND. Ordering alone
+    # fixes today's Linux; this is what stops the shape recurring.
+    case "$mt" in ''|*[!0-9]*) ;; *) age="$(human_age $((now - mt))) ago" ;; esac
   fi
 
   label="$key"
