@@ -23,7 +23,7 @@ bad() { say "FAIL: $*"; fail=1; }
 # 1. bash parses every shell file
 while IFS= read -r f; do
   bash -n "$f" || bad "bash -n $f"
-done < <(find "$REPO/bin" "$SKILL/lib" "$SKILL/daemons" "$SKILL/statusline" -name '*.sh' -type f 2>/dev/null)
+done < <(find "$REPO/bin" "$SKILL/bin" "$SKILL/lib" "$SKILL/daemons" "$SKILL/statusline" -name '*.sh' -type f 2>/dev/null)
 
 # 2. example configs are valid JSON
 for j in "$REPO/config.example.json" "$REPO/config.repo-local.example.json" \
@@ -43,7 +43,7 @@ done
 # violation of it. The sentinel exempts the marked LINE only — never a file, and
 # never a directory. Excluding check.sh wholesale would just rebuild the exact
 # blind spot this change closes.
-SHARED=$(find "$REPO/bin" "$SKILL/lib" "$SKILL/daemons" "$SKILL/statusline" -name '*.sh' -type f 2>/dev/null)
+SHARED=$(find "$REPO/bin" "$SKILL/bin" "$SKILL/lib" "$SKILL/daemons" "$SKILL/statusline" -name '*.sh' -type f 2>/dev/null)
 # ban <grep-flags> <regex> <message> — reports file:line, minus sentinel lines.
 ban() {
   local flags="$1" re="$2" msg="$3" h
@@ -83,7 +83,7 @@ uniq=$(for f in $copies; do sed -n '/^bus_resolve()/,/^}/p' "$f" | shasum | cut 
 # that must name a state path (like doctor.sh's ALLOW list, which uses bare
 # basenames anyway) is exempted per-line via the gate-literal sentinel.
 # Comments are exempt (^[^#]*): explaining a path is fine, shipping one is not.
-RUNTIME=$(find "$REPO/bin" "$SKILL/lib" "$SKILL/daemons" "$SKILL/statusline" -name '*.sh' -type f 2>/dev/null)
+RUNTIME=$(find "$REPO/bin" "$SKILL/bin" "$SKILL/lib" "$SKILL/daemons" "$SKILL/statusline" -name '*.sh' -type f 2>/dev/null)
 # /dev/null guarantees >=1 file arg: with an empty $RUNTIME, grep would
 # otherwise BLOCK reading stdin — a hung gate, worse than a red one.
 h=$(grep -En '^[^#]*(\$HOME|~)/[^"]*\.(pid|jsonl|log|lock|seen-ids)' $RUNTIME /dev/null 2>/dev/null | grep -v 'gate-literal')  # gate-literal

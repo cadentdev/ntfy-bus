@@ -1,5 +1,6 @@
 #!/bin/bash
-# bin/ntfy-waker-status.sh — which identities have a waker armed on this host,
+# skills/ntfy-bus/bin/ntfy-waker-status.sh — which identities have a waker armed
+# on this host,
 # right now, in one command. Read-only; exit 0 = ran, not "all armed".
 #
 # WHY THIS EXISTS: daemons/ntfy-bus-waker.sh is the same script for every
@@ -66,10 +67,14 @@ bus_resolve() {
   done
   printf '%s/%s' "$(cd -P "$(dirname "$t")" && pwd -P)" "$(basename "$t")"
 }
-REPO=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
+# Anchor to the SKILL dir (this script's parent), never to a repo root: the
+# skill is the unit that ships, and under a plugin install there is no repo
+# above it. Resolving via ../.. was why this tool was reachable only from a
+# clone (issue #17).
+SKILL_DIR=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
 
 # shellcheck source=skills/ntfy-bus/lib/resolve-config.sh
-. "$REPO/skills/ntfy-bus/lib/resolve-config.sh"
+. "$SKILL_DIR/lib/resolve-config.sh"
 
 [ -f "${NTFY_CONFIG:-}" ] || {
   echo "FATAL: config missing/unresolved at ${NTFY_CONFIG:-unresolved} — run the Setup workflow" >&2
@@ -92,8 +97,14 @@ STATE_DIR=$(dirname "$INBOX")
 # changes with it — that coupling is the point.
 MY_PIDFILE="${INBOX%.jsonl}.waker.pid"
 
+# GNU FIRST, and the caller validates. BSD-first was wrong in a way the `||`
+# cannot catch: GNU `stat -f` is not a format flag, it means FILE SYSTEM status,
+# so it SUCCEEDS on Linux and prints a multi-line block. The fallback therefore
+# never fired and the block reached arithmetic context, where the bare word
+# `File` aborted the subshell under `set -u` (issue #4). BSD has no `-c` and
+# fails cleanly with exit 1, so this order is safe both ways — verified on both.
 mtime_epoch() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
 }
 
 human_age() {
@@ -129,6 +140,26 @@ is_known_waker() {
   ps -p "$1" -o command= 2>/dev/null | grep -Eq "$KNOWN_WAKER_NAMES"
 }
 
+# WHICH JOB a row represents, read from the running process's COMMAND — not
+# from the pidfile's name. The distinction matters: identity is invisible in
+# argv (every identity runs the same script), but the JOB is not, because the
+# two jobs are different scripts. So this is evidence, not a naming heuristic
+# like identity_key, and it stays correct when a host config sets a pidfile
+# path that does not follow the usual stem convention.
+#
+# Without this column the documented healthy pair — one durable daemon plus one
+# in-session waker — renders as two identical armed rows for one identity, i.e.
+# indistinguishable from the drift it is most likely to be consulted about. The
+# obvious remedy for that misreading is to kill one, and the one that looks
+# redundant is the daemon that provides durable capture (issue #14).
+waker_job() {
+  case "$(ps -p "$1" -o command= 2>/dev/null)" in
+    *bus-waker-daemon*) printf 'daemon' ;;
+    *ntfy-bus-waker*)   printf 'waker'  ;;
+    *)                  printf '?'      ;;
+  esac
+}
+
 # --- Step 1: "is MY waker armed" — a direct answer, not a table to scan ---
 if [ -n "$ME" ]; then
   my_pid=$(cat "$MY_PIDFILE" 2>/dev/null)
@@ -142,7 +173,7 @@ if [ -n "$ME" ]; then
     echo "  inspect it before arming anything."
   else
     echo "This repo's identity ($ME): NOT ARMED"
-    echo "  arm it: bash \"$REPO/skills/ntfy-bus/daemons/ntfy-bus-waker.sh\"   (run in background, from this repo's cwd)"
+    echo "  arm it: bash \"$SKILL_DIR/daemons/ntfy-bus-waker.sh\"   (run in background, from this repo's cwd)"
   fi
   echo
 fi
@@ -185,7 +216,7 @@ if [ -z "$evidence" ]; then
   exit 0
 fi
 
-printf '%-22s %-8s %-20s %-40s %s\n' "IDENTITY" "PID" "STATUS" "CWD" "INBOX AGE"
+printf '%-22s %-7s %-8s %-20s %-40s %s\n' "IDENTITY" "JOB" "PID" "STATUS" "CWD" "INBOX AGE"
 now=$(date +%s)
 printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
   [ -n "$key" ] || continue
@@ -196,7 +227,10 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
   age="no inbox"
   if [ -n "$inbox_stem" ] && [ -f "${inbox_stem}.jsonl" ]; then
     mt=$(mtime_epoch "${inbox_stem}.jsonl")
-    [ -n "$mt" ] && age="$(human_age $((now - mt))) ago"
+    # Numeric, not merely non-empty: the failure mode this guards was never
+    # "no output", it was confident output of the wrong KIND. Ordering alone
+    # fixes today's Linux; this is what stops the shape recurring.
+    case "$mt" in ''|*[!0-9]*) ;; *) age="$(human_age $((now - mt))) ago" ;; esac
   fi
 
   label="$key"
@@ -208,14 +242,19 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
     | awk -F'\t' -v k="$key" '$1==k && $2=="pid" {print $3}')
 
   if [ -z "$pid_stems" ]; then
-    printf '%-22s %-8s %-20s %-40s %s\n' "$label" "-" "not armed" "-" "$age"
+    printf '%-22s %-7s %-8s %-20s %-40s %s\n' "$label" "-" "-" "not armed" "-" "$age"
     continue
   fi
 
   printf '%s\n' "$pid_stems" | while IFS= read -r stem; do
     pid=$(cat "${stem}.waker.pid" 2>/dev/null)
     cwd="-"
+    # A stale pidfile has no process, so no command, so no job: "-" rather than
+    # a guess from the stem, which would be exactly the conventional-path
+    # inference this script refuses everywhere else.
+    job="-"
     if is_alive "$pid"; then
+      job=$(waker_job "$pid")
       if is_known_waker "$pid"; then
         status="armed"
       else
@@ -225,7 +264,7 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
     else
       status="stale pidfile"
     fi
-    printf '%-22s %-8s %-20s %-40s %s\n' "$label" "${pid:--}" "$status" "$cwd" "$age"
+    printf '%-22s %-7s %-8s %-20s %-40s %s\n' "$label" "$job" "${pid:--}" "$status" "$cwd" "$age"
   done
 done
 

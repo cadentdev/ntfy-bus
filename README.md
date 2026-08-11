@@ -127,7 +127,7 @@ INBOX=$(jq -r '.inbox_jsonl' <your config>)   # ~/.claude/ntfy-inbox.<agent>.jso
 wc -c "${INBOX/#\~/$HOME}"                    # note the size
 # ...wait one poll interval (120s), send yourself a message, then re-check
 wc -c "${INBOX/#\~/$HOME}"                    # must have grown
-bin/ntfy-waker-status.sh                      # INBOX AGE should be seconds, not days
+~/.claude/skills/ntfy-bus/bin/ntfy-waker-status.sh   # INBOX AGE: seconds, not days
 ```
 
 A zero-byte or long-stale inbox next to a happily-loaded unit is the signature
@@ -484,17 +484,33 @@ The snapshot-in-project-repo pattern (documented at `Workflows/Setup.md`) works 
 
 ## Repo tooling (`bin/`)
 
-Four scripts, not part of the installed skill. Two are maintainer gates you run
-before pushing; two operate on a live host. All are read-only except
-`ntfy-poll-install.sh`. **They ship only in a clone** — a plugin install copies
-`skills/ntfy-bus/` and nothing else.
+Tooling lives in **two** `bin/` directories, and which one a script sits in is a
+statement about who can reach it:
+
+- **`skills/ntfy-bus/bin/`** — ships *inside* the skill, so it is present on
+  every install shape: clone, symlink, and plugin. Host-facing diagnostics
+  belong here.
+- **repo-root `bin/`** — **clone-only**, because a plugin install copies
+  `skills/ntfy-bus/` and nothing else. Maintainer gates and one-time setup
+  tooling belong here.
+
+The distinction is not cosmetic. A diagnostic you reach for mid-incident must
+not be the thing that is missing during the incident.
 
 | Script | What it does | When you run it |
 |---|---|---|
+| `skills/ntfy-bus/bin/ntfy-waker-status.sh` | Per-identity waker/capture table for this host — who is armed, and how stale each inbox is. Read-only; exit 0 means *it ran*, not *all armed*. | Diagnosing "is the bus actually working for me?". |
 | `bin/check.sh` | Portability/doctrine lint — bash+jq floor, no `${!VAR}` indirection, no hardcoded homes or agent names, and (section 6) no code defaults for state paths. | Before every push, with `tests/run.sh`. |
 | `bin/doctor.sh` | Host drift probe — finds host-local shadow copies of skill files that would silently outrank the canonical clone. | On a host behaving unlike its peers; after any hotfix. |
 | `bin/ntfy-poll-install.sh` | Renders and loads a per-identity durable-capture LaunchAgent (macOS). The guarded path for [Durable capture](#durable-capture-the-receive-path--required-on-every-receiving-host). | Once per identity, at install; again after moving a repo. |
-| `bin/ntfy-waker-status.sh` | Per-identity waker/capture table for this host — who is armed, and how stale each inbox is. Read-only; exit 0 means *it ran*, not *all armed*. | Diagnosing "is the bus actually working for me?". |
+
+All are read-only except `ntfy-poll-install.sh`.
+
+**If you write a PATH shim for a host-facing tool**, target it at
+`$HOME/.claude/skills/ntfy-bus/bin/<tool>` — the stable installed path. Never
+reach *upward* from the skill (`.../skills/ntfy-bus/../../bin`): that couples
+your shim to this repo's internal layout, and on a plugin install there is no
+repo above the skill for it to reach.
 
 `ntfy-waker-status.sh` exists because `daemons/ntfy-bus-waker.sh` is the same
 script for every identity, so `ps | grep` shows a live waker without telling you
