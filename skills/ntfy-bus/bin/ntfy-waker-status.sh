@@ -140,6 +140,26 @@ is_known_waker() {
   ps -p "$1" -o command= 2>/dev/null | grep -Eq "$KNOWN_WAKER_NAMES"
 }
 
+# WHICH JOB a row represents, read from the running process's COMMAND — not
+# from the pidfile's name. The distinction matters: identity is invisible in
+# argv (every identity runs the same script), but the JOB is not, because the
+# two jobs are different scripts. So this is evidence, not a naming heuristic
+# like identity_key, and it stays correct when a host config sets a pidfile
+# path that does not follow the usual stem convention.
+#
+# Without this column the documented healthy pair — one durable daemon plus one
+# in-session waker — renders as two identical armed rows for one identity, i.e.
+# indistinguishable from the drift it is most likely to be consulted about. The
+# obvious remedy for that misreading is to kill one, and the one that looks
+# redundant is the daemon that provides durable capture (issue #14).
+waker_job() {
+  case "$(ps -p "$1" -o command= 2>/dev/null)" in
+    *bus-waker-daemon*) printf 'daemon' ;;
+    *ntfy-bus-waker*)   printf 'waker'  ;;
+    *)                  printf '?'      ;;
+  esac
+}
+
 # --- Step 1: "is MY waker armed" — a direct answer, not a table to scan ---
 if [ -n "$ME" ]; then
   my_pid=$(cat "$MY_PIDFILE" 2>/dev/null)
@@ -196,7 +216,7 @@ if [ -z "$evidence" ]; then
   exit 0
 fi
 
-printf '%-22s %-8s %-20s %-40s %s\n' "IDENTITY" "PID" "STATUS" "CWD" "INBOX AGE"
+printf '%-22s %-7s %-8s %-20s %-40s %s\n' "IDENTITY" "JOB" "PID" "STATUS" "CWD" "INBOX AGE"
 now=$(date +%s)
 printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
   [ -n "$key" ] || continue
@@ -222,14 +242,19 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
     | awk -F'\t' -v k="$key" '$1==k && $2=="pid" {print $3}')
 
   if [ -z "$pid_stems" ]; then
-    printf '%-22s %-8s %-20s %-40s %s\n' "$label" "-" "not armed" "-" "$age"
+    printf '%-22s %-7s %-8s %-20s %-40s %s\n' "$label" "-" "-" "not armed" "-" "$age"
     continue
   fi
 
   printf '%s\n' "$pid_stems" | while IFS= read -r stem; do
     pid=$(cat "${stem}.waker.pid" 2>/dev/null)
     cwd="-"
+    # A stale pidfile has no process, so no command, so no job: "-" rather than
+    # a guess from the stem, which would be exactly the conventional-path
+    # inference this script refuses everywhere else.
+    job="-"
     if is_alive "$pid"; then
+      job=$(waker_job "$pid")
       if is_known_waker "$pid"; then
         status="armed"
       else
@@ -239,7 +264,7 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
     else
       status="stale pidfile"
     fi
-    printf '%-22s %-8s %-20s %-40s %s\n' "$label" "${pid:--}" "$status" "$cwd" "$age"
+    printf '%-22s %-7s %-8s %-20s %-40s %s\n' "$label" "$job" "${pid:--}" "$status" "$cwd" "$age"
   done
 done
 
