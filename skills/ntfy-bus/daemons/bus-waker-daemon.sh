@@ -86,18 +86,40 @@ SEEN=$(ntfy_expand_home "$SEEN");   PIDFILE=$(ntfy_expand_home "$PIDFILE")
 NOTIFY=$(ntfy_expand_home "$NOTIFY")
 SEEN_CAP=500; SEEN_KEEP=300; WAKELOG_CAP=500; WAKELOG_KEEP=300
 
-# Claim the pidfile (PID-reuse-safe: a live PID only blocks us if its command
-# line matches a known waker — .waker.cmdline_match, the SAME regex the
-# statusline probe greps, so a waker running under a legacy/custom name still
-# blocks a double-start). Check-then-write, not a lock: systemd serializes the
-# unit; the remaining window is two MANUAL same-instant launches, accepted.
-if oldpid=$(cat "$PIDFILE" 2>/dev/null) && [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then
-  ntfy_proc_cmdline "$oldpid" | grep -qE "$CMD_MATCH" && {
-    echo "FATAL: another waker (pid $oldpid) owns $PIDFILE" >&2; exit 1; }
+# This daemon's pidfile and the session waker's derived one are two different
+# JOBS' claims — the documented healthy pair runs both at once. A config that
+# points .waker.pidfile at the derived path makes the two fight over one lock,
+# and each exit deletes the other's claim. Refuse loudly (issue #27).
+if [ "$PIDFILE" = "$(ntfy_session_pidfile "$INBOX")" ]; then
+  echo "FATAL: .waker.pidfile ($PIDFILE) collides with the session waker's derived pidfile — give the daemon its own distinct .waker.pidfile in the host config" >&2
+  exit 1
 fi
-printf '%s\n' "$$" > "$PIDFILE" || { echo "FATAL: cannot write pidfile $PIDFILE" >&2; exit 1; }
-# Remove the pidfile ONLY while we still own it — if a twin overwrote it (the
-# accepted race above), exiting must not delete the LIVE twin's claim.
+
+# Claim the pidfile ATOMICALLY (issue #29): noclobber `>` is O_CREAT|O_EXCL,
+# so creation and pid-write are one step and two same-instant launches can
+# never both proceed. The old check-then-write accepted that window on the
+# systemd-serialization rationale; the session waker inherited it where
+# nothing serializes, so both wakers now share ONE concurrency contract and
+# the exception is deleted. PID-reuse-safe on the held path: a live PID only
+# blocks us if its command line matches a known waker — .waker.cmdline_match,
+# the SAME regex the statusline probe greps, so a waker running under a
+# legacy/custom name still blocks a double-start.
+claim_pidfile() { (set -C; echo "$$" > "$PIDFILE") 2>/dev/null; }
+if ! claim_pidfile; then
+  oldpid=$(cat "$PIDFILE" 2>/dev/null)
+  # A freshly-claimed pidfile can read empty for an instant; give it a beat.
+  [ -z "$oldpid" ] && { sleep 1; oldpid=$(cat "$PIDFILE" 2>/dev/null); }
+  if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null \
+     && ntfy_proc_cmdline "$oldpid" | grep -qE "$CMD_MATCH"; then
+    echo "FATAL: another waker (pid $oldpid) owns $PIDFILE" >&2; exit 1
+  fi
+  # Stale claim: reclaim once; losing the retry means another launch is
+  # reclaiming this instant — under systemd that restart will simply retry.
+  rm -f "$PIDFILE"
+  claim_pidfile || { echo "FATAL: cannot claim pidfile $PIDFILE (lost reclaim race or unwritable)" >&2; exit 1; }
+fi
+# Remove the pidfile ONLY while we still own it — if another launch reclaimed
+# it (stale-reclaim path above), exiting must not delete the LIVE owner's claim.
 release_pidfile() { [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$PIDFILE"; }
 # The follow-pipeline below never exits on its own, and bash DEFERS signal
 # traps until the foreground command finishes — so the pipeline runs as a

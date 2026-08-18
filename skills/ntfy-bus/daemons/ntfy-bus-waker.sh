@@ -91,8 +91,10 @@ if [ -z "$INBOX" ]; then
 fi
 INBOX=$(ntfy_expand_home "$INBOX")
 # The session pidfile derives from the configured inbox path: config-anchored
-# and per-identity unique without a new migration key.
-PIDFILE="${INBOX%.jsonl}.waker.pid"
+# and per-identity unique without a new migration key. Shared helper — the
+# status tool and arm hook derive it the same way, so readers and writer can
+# never watch different files (issue #27).
+PIDFILE=$(ntfy_session_pidfile "$INBOX")
 INTERVAL="${NTFY_WAKER_INTERVAL:-30}"
 SELF="$(basename "${BASH_SOURCE[0]}")"
 # Wake-set + noise mute come from the same config keys the durable daemon reads
@@ -157,20 +159,42 @@ match_scan() {
       | "\(.id)\t\(.title)"' 2>/dev/null
 }
 
-# --- idempotent pidfile guard: don't stack duplicate wakers ---
-# PID-reuse-safe: a bare `kill -0` can be fooled by an unrelated process that
-# inherited a recycled pid, which would block every future arm. Also confirm
-# the live pid is actually one of our wakers via its command line (fleet review;
-# `ps -p` is portable across macOS + Linux, unlike /proc).
-if [ -f "$PIDFILE" ]; then
+# --- atomic pidfile claim: don't stack duplicate wakers (issue #29) ---
+# noclobber `>` is O_CREAT|O_EXCL: creation and pid-write are ONE atomic step,
+# so two same-instant arms can never both proceed — exactly one create wins.
+# The old check-then-write let both racers pass the liveness check and both
+# run, with the loser's pid overwritten: a live waker invisible to every
+# pidfile reader (status, hook), delivering duplicate wakes. Concurrent arms
+# are this script's ROUTINE traffic (SessionStart re-arms, multi-session
+# hosts), not a rare manual double-launch, so the window was real.
+# An mkdir side-lock was considered and rejected: it adds a second state file
+# that outlives a SIGKILL and a lockdir-but-no-pidfile limbo state. Here the
+# pidfile IS the lock, and the existing liveness+cmdline check gates
+# RECLAMATION of a stale claim — not acquisition.
+claim_pidfile() { (set -C; echo $$ > "$PIDFILE") 2>/dev/null; }
+if ! claim_pidfile; then
   old=$(cat "$PIDFILE" 2>/dev/null)
+  # A freshly-claimed pidfile can read empty for an instant between the
+  # winner's O_EXCL create and its write landing; give it a beat.
+  [ -z "$old" ] && { sleep 1; old=$(cat "$PIDFILE" 2>/dev/null); }
+  # PID-reuse-safe: a bare `kill -0` can be fooled by an unrelated process that
+  # inherited a recycled pid, which would block every future arm. Also confirm
+  # the live pid is actually one of our wakers via its command line (fleet
+  # review; `ps -p` is portable across macOS + Linux, unlike /proc).
   if [ -n "$old" ] && kill -0 "$old" 2>/dev/null \
      && ps -p "$old" -o command= 2>/dev/null | grep -q "$SELF"; then
     echo "waker already armed for $ME (pid $old) — exiting without stacking"
     exit 0
   fi
+  # Stale claim (dead pid, or a recycled pid running something else): reclaim.
+  # ONE retry — losing it means another arm is reclaiming this instant, and
+  # the goal is one live waker, not THIS one.
+  rm -f "$PIDFILE"
+  if ! claim_pidfile; then
+    echo "waker arm for $ME lost the reclaim race — another arm is live; exiting without stacking"
+    exit 0
+  fi
 fi
-echo $$ > "$PIDFILE"
 # set cleanup trap only AFTER claiming the pidfile: a no-op launch exits at the
 # guard above BEFORE claiming, so an earlier trap would rm the RUNNING waker's
 # pidfile. Ordering is load-bearing.

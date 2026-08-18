@@ -62,7 +62,12 @@ if [ -z "$INBOX" ]; then
   exit 0
 fi
 INBOX=$(ntfy_expand_home "$INBOX")
-PIDFILE="${INBOX%.jsonl}.waker.pid"
+# The SESSION waker's pidfile, via the shared helper (issue #27). The durable
+# daemon's pidfile (.waker.pidfile) is deliberately NOT consulted here: a
+# running daemon can only notify, never re-invoke an idle agent, so it must
+# not read as "armed" to the one hook whose whole job is prompting the
+# wake-capable arm.
+PIDFILE=$(ntfy_session_pidfile "$INBOX")
 
 # Gate: only prompt where a durable capture exists. Surface a missing inbox on
 # STDOUT (=> agent context) so a dead capture can't fail silent — a silent skip

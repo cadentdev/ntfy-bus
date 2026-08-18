@@ -126,5 +126,24 @@ ntfy_resolve_config() {
   return 0
 }
 
+# Waker pidfile resolution — the ONE definition of both conventions (issue
+# #27). TWO pidfiles exist BY DESIGN, because they are two different JOBS, not
+# two spellings of one fact: the SESSION waker (harness-tracked, wake-capable,
+# daemons/ntfy-bus-waker.sh) derives its pidfile from the configured inbox;
+# the DURABLE daemon (notify-only, daemons/bus-waker-daemon.sh) claims
+# .waker.pidfile from config. They may run simultaneously — that is the
+# documented healthy pair — so they must never share a file. Every reader asks
+# about the job it means, through these helpers, or both when the question is
+# "is anything watching this identity".
+ntfy_session_pidfile() { # $1 = EXPANDED inbox path -> the session waker's pidfile
+  printf '%s' "${1%.jsonl}.waker.pid"
+}
+ntfy_daemon_pidfile() { # $1 = config path -> the daemon's pidfile; empty = not configured
+  local p
+  p=$(jq -r '.waker.pidfile // ""' "$1" 2>/dev/null) || p=""
+  [ -n "$p" ] && ntfy_expand_home "$p"
+  return 0
+}
+
 # Auto-resolve when sourced so callers can use "$NTFY_CONFIG" immediately.
 ntfy_resolve_config
