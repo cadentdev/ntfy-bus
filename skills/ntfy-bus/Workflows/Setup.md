@@ -152,8 +152,12 @@ EOF
 # .gitignore, effective immediately, no commit and no PR to wait on
 # (issue #23 — on a branch-protected repo the tracked-.gitignore PR was the
 # one onboarding step that blocked on a human, and until it merged the live
-# identity sat unfenced). --git-path handles worktrees, where .git is a file.
-EXCL="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)/info/exclude"
+# identity sat unfenced). --git-path (NOT --absolute-git-dir): in a linked
+# worktree the git dir is .git/worktrees/<name>/, whose info/exclude git
+# never reads — --git-path resolves to the COMMON dir's exclude, the one git
+# actually consults.
+EXCL="$(git -C "$REPO_ROOT" rev-parse --git-path info/exclude)"
+case "$EXCL" in /*) ;; *) EXCL="$REPO_ROOT/$EXCL" ;; esac
 mkdir -p "$(dirname "$EXCL")"
 grep -qxF '.claude/ntfy-bus.config.json' "$EXCL" 2>/dev/null \
   || echo '.claude/ntfy-bus.config.json' >> "$EXCL"

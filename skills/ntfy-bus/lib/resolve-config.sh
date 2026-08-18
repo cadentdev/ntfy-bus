@@ -73,6 +73,19 @@ ntfy_host_is_locked() {
   return 0                            # default => locked
 }
 
+# WHY a host is locked, for callers that must explain a refusal (onboard.sh).
+# One place answers, so no caller re-probes the marker directory inline and
+# drifts when its (legacy) name changes. Prints one of:
+#   pai-marker | no-config | no-optin | unlocked
+ntfy_lock_reason() {
+  if [ -d "${_ntfy_home}/.claude/PAI" ]; then printf 'pai-marker'
+  elif [ ! -f "${_ntfy_home}/.claude/ntfy-bus.config.json" ]; then printf 'no-config'
+  elif ntfy_host_is_locked; then printf 'no-optin'
+  else printf 'unlocked'
+  fi
+  return 0
+}
+
 # Resolve the config path for the current host + repo into NTFY_CONFIG.
 ntfy_resolve_config() {
   local host_global="${_ntfy_home}/.claude/ntfy-bus.config.json"
