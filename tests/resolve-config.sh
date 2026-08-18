@@ -67,12 +67,26 @@ assert_eq "unlocked: repo-local path" "$ROOT/fakerepo/.claude/ntfy-bus.config.js
 rm "$ROOT/fakerepo/.claude/ntfy-bus.config.json"
 assert_eq "unlocked, no repo config: unresolved" "none" "$(with_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
 assert_eq "unlocked, no repo config: empty config path" "" "$(with_repo 'printf %s "$NTFY_CONFIG"')"
-# ...but OUTSIDE any repo (daemon context — bus-waker.service sets no
-# WorkingDirectory) host-global is still the answer, else durable notification
-# dies on every opt-in host.
-no_repo() { ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
+# ...but OUTSIDE any repo, in EXPLICIT daemon context (NTFY_DAEMON_CONTEXT=1,
+# set by the shipped unit templates) host-global is still the answer, silently
+# — else durable notification dies on every opt-in host. WITHOUT the marker
+# this release warns-and-allows (issue #9 migration, phase 1); the flip to
+# refuse re-points these assertions.
+no_repo() { ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
+as_daemon() { ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
 mkdir -p "$ROOT/norepo"
-assert_eq "unlocked, no repo context: host-global" "host-global" "$(no_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+assert_eq "unlocked, marked daemon, no repo: host-global" "host-global" "$(as_daemon 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+marked_err=$( ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" 2>&1 >/dev/null ) )
+case "$marked_err" in
+  *WARNING*) fail "marked daemon resolves silently (got: '$marked_err')" ;;
+  *) pass "marked daemon resolves silently" ;;
+esac
+assert_eq "unlocked, UNMARKED, no repo: still host-global (phase 1)" "host-global" "$(no_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+unmarked_err=$( ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT; cd "$ROOT/norepo"; . "$RESOLVER" 2>&1 >/dev/null ) )
+case "$unmarked_err" in
+  *"NTFY_DAEMON_CONTEXT"*) pass "unmarked resolution warns, naming the marker" ;;
+  *) fail "unmarked resolution warns, naming the marker (got: '$unmarked_err')" ;;
+esac
 cleanup
 
 echo "L7: ntfy_expand_home"

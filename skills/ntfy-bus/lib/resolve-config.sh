@@ -27,10 +27,11 @@
 #                          (source "none", empty NTFY_CONFIG) — there is no
 #                          host-global fallback inside a repo, because falling
 #                          back means acting as an agent this repo never named.
-#                          Outside any repo (daemon context: bus-waker.service
-#                          sets no WorkingDirectory) the host-global config is
-#                          used, which is the machine's own identity and cannot
-#                          mismatch a repo.
+#                          Outside any repo the host-global config is used ONLY
+#                          in explicit daemon context (NTFY_DAEMON_CONTEXT=1,
+#                          set by the shipped unit templates); without the
+#                          marker this release warns-and-allows, and a future
+#                          release refuses (issue #9 migration).
 #
 # Default-safe polarity: the secure state (locked) is the default; per-repo
 # identity is an explicit opt-in. A fresh, never-reconfigured host is locked.
@@ -114,13 +115,25 @@ ntfy_resolve_config() {
     NTFY_CONFIG=""
     echo "ntfy resolve-config: opt-in host, but ${repo_root} has no .claude/ntfy-bus.config.json — identity UNRESOLVED (no host-global fallback by design). Run the Setup workflow to give this repo an identity." >&2
   else
-    # No repo context at all (systemd/launchd daemon, bare shell). The machine's
-    # own identity is the only meaningful answer here, and this path cannot
-    # produce the hijack above because there is no repo to mismatch against.
-    # bus-waker.service sets no WorkingDirectory, so this branch is what keeps
-    # durable notification alive on opt-in hosts.
+    # No repo context at all. This branch is what keeps durable notification
+    # alive on opt-in hosts (bus-waker.service sets no WorkingDirectory) — but
+    # "no repo context" is NOT the same thing as "daemon context": an ordinary
+    # interactive session crosses this boundary with a single `cd /tmp`, and
+    # would then silently resolve as the host's agent — the exact substitution
+    # PR #7 was written to eliminate (issue #9). Daemon context is therefore
+    # EXPLICIT: the shipped unit templates set NTFY_DAEMON_CONTEXT=1, and only
+    # that marker makes the host-global answer silent here.
+    #
+    # MIGRATION (issue #9, phase 1 of 2): hosts carry their own installed unit
+    # copies, so a marker-less daemon must not break silently — this release
+    # WARNS and still resolves host-global. A future release flips this branch
+    # to refuse (source "none") without the marker, exactly as the in-repo
+    # unconfigured case already does.
     NTFY_IDENTITY_SOURCE="host-global"
     NTFY_CONFIG="$host_global"
+    if [ "${NTFY_DAEMON_CONTEXT:-}" != "1" ]; then
+      echo "ntfy resolve-config: WARNING — resolved the HOST-GLOBAL identity outside any git work tree without NTFY_DAEMON_CONTEXT=1. If this is a daemon, update its installed unit file (the shipped templates now set the marker); if this is an interactive session, cd into the repo whose identity you mean — a future release will refuse to resolve here." >&2
+    fi
   fi
   export NTFY_HOST_LOCKED NTFY_IDENTITY_SOURCE NTFY_CONFIG
   return 0

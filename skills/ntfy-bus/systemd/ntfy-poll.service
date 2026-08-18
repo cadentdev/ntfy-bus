@@ -30,4 +30,6 @@ Type=oneshot
 # your config spells it. Edit both for this host.
 Environment=NTFY_POLL_REPO=%h/Repos/CHANGE/ME
 Environment=EXPECT_AGENT=changeme
+# Declares DAEMON CONTEXT explicitly (issue #9) — needs no per-host edit.
+Environment=NTFY_DAEMON_CONTEXT=1
 ExecStart=%h/.claude/skills/ntfy-bus/daemons/ntfy-poll-to-jsonl.sh

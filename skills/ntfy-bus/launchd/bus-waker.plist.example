@@ -59,6 +59,11 @@
         <string>__HOME__</string>
         <key>PATH</key>
         <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string>
+        <!-- Declares DAEMON CONTEXT explicitly (issue #9): on an opt-in host
+             the resolver takes the host-global identity outside a repo only
+             for marked daemons. Keep this key. -->
+        <key>NTFY_DAEMON_CONTEXT</key>
+        <string>1</string>
         <!-- Repo-local identity ONLY — delete this key for host-global
              identity. resolve-config.sh reads CLAUDE_PROJECT_DIR to find the
              repo-local config; this is what makes the daemon run as that
