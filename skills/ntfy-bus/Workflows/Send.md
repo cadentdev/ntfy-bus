@@ -27,11 +27,21 @@ NTFY_PASS=$(eval "printf '%s' \"\${$PASS_VAR}\"")
 
 ## Step 2: Validate Recipient
 
-Recipient must be a known agent ID or `ALL`. Known set is configurable per fleet — current canonical set:
+Validate the **shape**, not membership on a list: the recipient must be a
+single non-empty name token (letters/digits, no spaces or pointer characters)
+or the broadcast address `ALL`. The bus itself is the authority on who exists —
+delivery is by Title convention on a private topic, and there is no recipient
+registry to check against (issue #18: an earlier version of this step presented
+example names as a canonical allowlist and said to reject everything else,
+which followed literally would refuse every real recipient — and hardcoding the
+real roster here would violate the no-agent-names doctrine AND publish the
+fleet's agent list in a public repo).
 
-- `Alice`, `Bob`, `Carol`, `Dana`, `ALL`
-
-Reject unknown recipients with a clear error rather than guessing.
+Recipients are whoever your fleet actually runs — e.g. an `Alice`, `Bob`, or
+`Carol` of yours (placeholders; no real fleet uses them). If the user names a
+recipient you have never seen on this bus, say so and confirm before sending —
+but confirm, don't refuse: a mis-send on a private bus is recoverable, a
+refused legitimate send is a failed task.
 
 Send always emits the canonical `→` pointer in the Title. Inbound matchers also tolerate `➡️`, `➡`, `👉`, `->`, and the space-delimited word ` to ` (case-insensitive) — those are receive-side conveniences only; never emit them from here.
 

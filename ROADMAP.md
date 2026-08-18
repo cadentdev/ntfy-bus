@@ -101,7 +101,7 @@ security fix and the architecture converge on the same answer.
   `waker.autoarm: always|repo-local|off` knob was rejected: its `always` value restores the
   host-global fallback that PR #7 removed, and it invests in a component whose scope is
   deliberately shrinking.
-- **Do not build a second config file.** The host-global config remains the only per-machine
+- **Do not build a second config file.** The host-global config remains the only per-host
   surface, per `CLAUDE.md`.
 
 ## Sequencing

@@ -104,7 +104,7 @@ ntfy_resolve_config() {
     NTFY_CONFIG="$repo_cfg"
   elif [ -n "$repo_root" ]; then
     # In a repo, on a host that opted into per-repo identity, but this repo
-    # carries no identity: that is UNCONFIGURED, not "use the machine's agent".
+    # carries no identity: that is UNCONFIGURED, not "use the host's agent".
     # There is deliberately NO host-global fallback here — falling back silently
     # arms and sends as whichever agent the host happens to own, which is an
     # identity hijack by omission (the Cindy incident, 2026-08-08: a session in

@@ -1,5 +1,5 @@
 #!/bin/bash
-# bin/doctor.sh — host drift probe. Run on any fleet host: is this machine's
+# bin/doctor.sh — host drift probe. Run on any fleet host: is this host's
 # bus install healthy and canonical? Read-only; exit 0 = healthy.
 set -u
 # Portable symlink resolver — keep in sync with bin/check.sh (pre-lib bootstrap).
@@ -83,7 +83,7 @@ fi
 # to check, and a config there is legitimately just a file (see #9 — the
 # not-a-git-repo case is load-bearing on this fleet). Ignore state comes from
 # `git check-ignore -v`, not a .gitignore grep: the rule may live in a GLOBAL
-# ignore file, which protects this machine and NOT a fresh clone — so the
+# ignore file, which protects this host and NOT a fresh clone — so the
 # report names where the rule came from.
 cwd_repo=$(git rev-parse --show-toplevel 2>/dev/null) || cwd_repo=""
 if [ -n "$cwd_repo" ] && [ -f "$cwd_repo/.claude/ntfy-bus.config.json" ]; then

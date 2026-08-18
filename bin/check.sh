@@ -74,7 +74,7 @@ uniq=$(for f in $copies; do sed -n '/^bus_resolve()/,/^}/p' "$f" | shasum | cut 
 [ "$uniq" = "1" ] || bad "bus_resolve() copies have DIVERGED across $n files ($uniq distinct versions) — they must be byte-identical"
 
 # 6. no literal STATE-FILE paths in shared runtime code. Every state path
-# (pidfile, inbox, wake-log, seen-ids, lock) is a per-machine fact and must
+# (pidfile, inbox, wake-log, seen-ids, lock) is a per-host fact and must
 # come from config; if config doesn't supply it, code FAILS LOUD — it never
 # guesses. This generalizes the daemon's fail-loud identity rule from WHO an
 # agent is to WHERE its state lives. bin/ is IN scope: status/
@@ -122,6 +122,14 @@ for f in "$SKILL"/Workflows/*.md; do
   grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*resolve-config\.sh' "$f" || continue
   grep -q 'ntfy_require_config' "$f" || bad "workflow sources resolver without ntfy_require_config: $f"
 done
+
+# 9. docs must not re-teach the pre-PR#7 fallback model (issue #10): the
+# phrase below is how both README and SKILL.md described resolution for a
+# month after the resolver stopped doing it — a contributor following the
+# public docs would produce the exact hijack PR #7 closed. Docs and resolver
+# must not drift apart silently again.
+h=$(grep -n 'falling back to host-global' "$REPO/README.md" "$SKILL/SKILL.md" 2>/dev/null)
+[ -n "$h" ] && bad "docs teach the removed host-global fallback (see issue #10): $(printf '%s' "$h" | tr '\n' ' ')"
 
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

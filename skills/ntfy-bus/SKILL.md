@@ -61,13 +61,18 @@ All workflows resolve the config path through the shared guard
   `~/.claude/ntfy-bus.config.json`; any repo-local identity config is ignored.
   This is default-safe: a fresh host is locked.
 - **Vanilla opt-in** — the host-global config sets `per_repo_identity_allowed: true`
-  and no `~/.claude/PAI/`. Prefers the repo-local `<repo>/.claude/ntfy-bus.config.json`,
-  falling back to host-global. Lets one machine carry per-repo identities
-  (e.g. one identity per repo).
+  and no `~/.claude/PAI/`. Inside a repo, the repo-local
+  `<repo>/.claude/ntfy-bus.config.json` (untracked, per-contributor) IS the
+  identity; a repo without one resolves to NOTHING (source `none`, empty
+  `$NTFY_CONFIG`) and every workflow refuses to act — there is no host-global
+  fallback inside a repo. Host-global applies only outside any repo, in
+  explicit daemon context (`NTFY_DAEMON_CONTEXT=1`, set by the shipped unit
+  templates). Lets one host carry per-repo identities (e.g. one identity per
+  repo).
 
 Secrets (NTFY_USERNAME/NTFY_PASSWORD) live in `~/.env` or `~/.claude/.env` and are
 referenced by name in the config — never the values. See `config.example.json`
-(host-global) and `config.repo-local.example.json` (tracked, per-repo) for the
+(host-global) and `config.repo-local.example.json` (untracked, per-repo, per-contributor) for the
 schemas.
 
 ## Hybrid Inbox Read Strategy

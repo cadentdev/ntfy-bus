@@ -6,11 +6,11 @@ Identity resolution is governed by the shared guard in `lib/resolve-config.sh`.
 This workflow writes the config(s) that guard reads. Two host classes:
 
 - **LifeOS host** (`~/.claude/PAI/` exists — the marker directory keeps
-  LifeOS's former name) — one identity per machine, host-locked.
+  LifeOS's former name) — one identity per host, host-locked.
   Setup writes ONLY the host-global config and **refuses** to create a
   repo-local identity config (write-time half of the hijack guard).
 - **Vanilla host** — may opt in to per-repo identity, where the atomic unit of
-  identity is the repo, not the machine.
+  identity is the repo, not the host.
 
 ## Step 0: Detect Host Class
 
@@ -22,10 +22,11 @@ echo "host class: $HOST_CLASS"
 On a **vanilla** host, ask the user:
 
 - **Per-repo identity, or one identity for the whole machine?**
-  - *Per-repo* (one identity per repo): the bus identity is
-    tracked in each repo and travels with it. Requires `per_repo_identity_allowed: true`
+  - *Per-repo* (one identity per repo): each repo carries its own bus identity
+    in an **untracked, per-contributor** config (never committed — see Step 6a).
+    Requires `per_repo_identity_allowed: true`
     in the host-global config (this Setup sets it).
-  - *Host-global*: a single identity for every repo on this machine.
+  - *Host-global*: a single identity for every repo on this host.
 
 On a **LifeOS** host there is no choice — always host-global, host-locked.
 
@@ -113,15 +114,15 @@ time, even on hosts that never run the daemon, costs nothing and means enabling
 the daemon later is just `systemctl --user enable --now`. A leading `~/` in any
 config path is expanded to `$HOME` by every consumer (`ntfy_expand_home`).
 
-On a host-global setup, the `agent_id` above IS the machine's identity.
+On a host-global setup, the `agent_id` above IS the host's identity.
 
 On a per-repo (opt-in) setup it is **not** a fallback for config-less repos —
 there is no such fallback. Inside a repo with no `.claude/ntfy-bus.config.json`,
 identity resolves to NOTHING (`NTFY_IDENTITY_SOURCE=none`, empty `NTFY_CONFIG`)
 and every consumer refuses to act on the bus. The host-global `agent_id` is used
-only where there is no repo context at all — the systemd/launchd daemon, which
-sets no `WorkingDirectory` — so durable notification keeps working while nothing
-can ever send or wake as an agent the repo never named.
+only outside any repo, in explicit daemon context — the shipped systemd/launchd
+unit templates set `NTFY_DAEMON_CONTEXT=1` — so durable notification keeps
+working while nothing can ever send or wake as an agent the repo never named.
 
 ## Step 6: (Vanilla, per-repo only) Write the Repo-Local Identity + Wiring
 

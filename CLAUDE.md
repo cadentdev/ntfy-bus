@@ -22,15 +22,15 @@ installed systemd unit copies, notify hooks.
   from `lib/resolve-config.sh`; host differences from `lib/capabilities.sh`
   (capabilities, never host class).
 
-## Config is the only per-machine surface
+## Config is the only per-host surface
 
 One host-global file — `~/.claude/ntfy-bus.config.json` — is the source of
-truth for everything machine-specific: identity, waker mode, statusline
-appearance. New per-machine knobs extend that file (with safe defaults);
-never invent a second config file. On locked hosts, per-repo == per-machine.
+truth for everything host-specific: identity, waker mode, statusline
+appearance. New per-host knobs extend that file (with safe defaults);
+never invent a second config file. On locked hosts, per-repo == per-host.
 
 **Exception — state paths have NO defaults.** Identity (`agent_id`) and state
-paths (pidfile, inbox, wake-log, seen-ids, locks) are per-machine FACTS, not
+paths (pidfile, inbox, wake-log, seen-ids, locks) are per-host FACTS, not
 knobs: code must read them from config and **fail loud** when absent, never
 fall back to a baked-in path (`bin/check.sh` section 6 enforces this). A knob
 with a safe default degrades gracefully; a defaulted state path points shared

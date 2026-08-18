@@ -117,7 +117,7 @@ PASS_VAR=$(jq -r '.auth_env.password' "$CONFIG")
 # namespaced path (e.g. ~/.claude/ntfy-inbox.<agent>.jsonl); never code-derived.
 JSONL=$(jq -r '.inbox_jsonl // ""' "$CONFIG")
 if [ -z "$JSONL" ]; then
-  echo "FATAL: .inbox_jsonl missing/empty in $CONFIG — state paths are per-machine config, not code defaults" >&2
+  echo "FATAL: .inbox_jsonl missing/empty in $CONFIG — state paths are per-host config, not code defaults" >&2
   exit 1
 fi
 JSONL=$(ntfy_expand_home "$JSONL")
