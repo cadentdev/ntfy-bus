@@ -147,18 +147,36 @@ cat > "${REPO_ROOT}/.claude/ntfy-bus.config.json" <<EOF
 }
 EOF
 
+# Fence FIRST, via the repo's local-only exclude file: same syntax as
+# .gitignore, effective immediately, no commit and no PR to wait on
+# (issue #23 — on a branch-protected repo the tracked-.gitignore PR was the
+# one onboarding step that blocked on a human, and until it merged the live
+# identity sat unfenced). --git-path handles worktrees, where .git is a file.
+EXCL="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)/info/exclude"
+mkdir -p "$(dirname "$EXCL")"
+grep -qxF '.claude/ntfy-bus.config.json' "$EXCL" 2>/dev/null \
+  || echo '.claude/ntfy-bus.config.json' >> "$EXCL"
+```
+
+Then, as a **follow-up** (not a blocker — the exclude above already protects
+this clone): add the same entry to the repo's tracked `.gitignore`, via PR if
+the repo is branch-protected. The tracked entry still has real value — it
+protects every *other* clone's contributor, which `.git/info/exclude` cannot —
+but the identity config must never sit unfenced while that PR waits.
+
+```bash
 IGN="${REPO_ROOT}/.gitignore"
 grep -qxF '.claude/ntfy-bus.config.json' "$IGN" 2>/dev/null \
   || echo '.claude/ntfy-bus.config.json' >> "$IGN"
 ```
 
-**Do not commit this file**, and do not encourage anyone else to. It carries no
-secrets (creds are env-var *names*), but it does carry a live fleet **identity**:
-committing it hands that agent's name to everyone who clones the repo, and the
-first clone to run a workflow starts sending and arming wakers as that agent.
-Identity is per-contributor, not per-project. On a locked host the read-time
-guard would ignore a tracked config anyway — so committing it buys nothing and
-risks a hijack.
+**Do not commit the identity config**, and do not encourage anyone else to. It
+carries no secrets (creds are env-var *names*), but it does carry a live fleet
+**identity**: committing it hands that agent's name to everyone who clones the
+repo, and the first clone to run a workflow starts sending and arming wakers
+as that agent. Identity is per-contributor, not per-project. On a locked host
+the read-time guard would ignore a tracked config anyway — so committing it
+buys nothing and risks a hijack.
 
 `inbox_jsonl` must be a real path, not `""`. It is the one key that turns the
 wake path on: `daemons/ntfy-bus-waker.sh` fails loud on an empty value, and both
@@ -166,12 +184,29 @@ the session pidfile (`${inbox%.jsonl}.waker.pid`) and the wake-private ledger
 (`${inbox%.jsonl}.wake-seen`) derive from it. A leading `~/` is expanded by
 `ntfy_expand_home`, so the value stays portable across hosts.
 
-**6b. Untracked hook wiring** (machine-specific bun path — never tracked):
+**6b. BridgeBodyGuard hook — verify the HOST-GLOBAL wiring** (once per host,
+not per repo — issue #24):
+
+Nothing in the hook is repo-specific; the only host-specific part is the bun
+interpreter path. It belongs in `~/.claude/settings.json`, exactly like
+`arm-bus-waker.sh` already is — one entry covers every repo on the host,
+present and future, where per-repo copies meant every unwired repo silently
+lost the byte-cap guard. The hook no-ops cheaply on non-bus Bash calls, so
+host-global scope costs nothing on repos that never touch the bus.
+
+First check whether it is already wired:
+
+```bash
+grep -q 'BridgeBodyGuard' "$HOME/.claude/settings.json" 2>/dev/null \
+  && echo "already wired host-globally" || echo "NOT wired"
+```
+
+If NOT wired, add it host-globally:
 
 ```bash
 BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 HOOK_CMD="${BUN} ${HOME}/.claude/skills/ntfy-bus/hooks/BridgeBodyGuard.hook.ts"
-SETTINGS="${REPO_ROOT}/.claude/settings.local.json"
+SETTINGS="$HOME/.claude/settings.json"
 
 [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
 tmp=$(mktemp)
@@ -185,16 +220,12 @@ jq --arg cmd "$HOOK_CMD" '
 ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
 ```
 
-The `settings.local.json` is machine-specific (the bun interpreter path differs
-across hosts) so it must stay **untracked**. Ensure the repo ignores it:
+An agent may be blocked from editing hook config in settings files (the
+permission classifier sensibly gates hook self-modification). If the edit is
+refused, print the `HOOK_CMD` value and the jq snippet above and hand the step
+to the human — it is pure boilerplate and needs doing once per host, ever.
 
-```bash
-IGN="${REPO_ROOT}/.gitignore"
-grep -qxF '.claude/settings.local.json' "$IGN" 2>/dev/null \
-  || echo '.claude/settings.local.json' >> "$IGN"
-```
-
-## Step 7: Smoke Test
+## Step 7: Smoke Test (capture path)
 
 ```bash
 echo "smoke test from $(hostname)" \
@@ -210,7 +241,53 @@ smoke message should appear, addressed from this agent to itself. For a per-repo
 setup, confirm `CheckInbox` resolves the repo-local identity (the resolver
 exports `NTFY_IDENTITY_SOURCE=repo-local`).
 
-## Step 8: (Optional) Register for auto-sync
+> **What this validates — and deliberately does NOT** (issue #25): a
+> **self-sent** message exercises send → capture → CheckInbox only. The waker
+> drops `msg_sender == me` **by design**, so a self-sent message can NEVER
+> produce a wake. Do not test the wake path by messaging yourself, and do not
+> report "the waker failed" when it correctly ignores one — that mis-diagnosis
+> has happened in a real onboarding.
+
+## Step 7b: Wake-Path Test (only if a waker is armed)
+
+Send with an **external sender header** so the waker's self-skip does not
+apply. `Setup` as the sender also stays clear of the noise-sender mute list,
+which `cron`/`bot`-style names would trip:
+
+```bash
+echo "wake test from $(hostname)" \
+  | curl -s -u "${NTFY_USERNAME}:${NTFY_PASSWORD}" \
+      -H "Title: Setup→${AGENT_ID}: wake test" \
+      --data-binary @- \
+      "${ENDPOINT}/${TOPIC}" \
+  | jq .
+```
+
+Expect, in order: durable capture within one poll interval (the inbox JSONL
+grows), then the armed session waker prints `WAKE: Setup→...` and **exits** —
+exit-on-match is the wake mechanism, not a crash. Re-arm it afterwards.
+
+## Step 8: Finish With a Green Doctor Run
+
+The smoke test validates one path; `bin/doctor.sh` probes the rest of what
+Setup just configured — skill path resolution, config parse + identity source,
+shadow scan, and the identity-config tracking state (tracked = DRIFT,
+unignored = warn; Step 6a's fence should make it report `ok ... ignored`).
+
+It lives in repo-root `bin/` (host tooling, not part of the installed skill),
+so run it from the clone — on the recommended clone+symlink install:
+
+```bash
+cd "$(dirname "$(readlink "$HOME/.claude/skills/ntfy-bus")")/.." && bash bin/doctor.sh
+```
+
+For a per-repo setup, run it from the identity repo's directory so the
+tracking-state section checks THAT repo. Onboarding is done when doctor exits
+green (the `repo has uncommitted changes` line is expected while a fence PR is
+in flight). On a plugin-only install there is no clone to run it from — skip,
+and note the gap.
+
+## Step 9: (Optional) Register for auto-sync
 
 If this host has infrastructure that auto-syncs git repos, register the skill
 repo (`cadentdev/ntfy-bus`) with it so updates arrive automatically. Skip on
