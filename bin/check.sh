@@ -113,5 +113,15 @@ done
 t=$(git -C "$REPO" ls-files -- '.claude/ntfy-bus.config.json' '*/.claude/ntfy-bus.config.json' 2>/dev/null)
 [ -n "$t" ] && bad "bus identity config is TRACKED (identity is per-contributor — untrack it: git rm --cached <file>): $(printf '%s' "$t" | tr '\n' ' ')"
 
+# 8. every Workflow that sources the resolver must also call the caller-side
+# gate (issue #8). The resolver's header states the contract — treat an empty
+# NTFY_CONFIG as unconfigured and refuse — but a stated contract is a comment,
+# and a comment is not a gate. Gating on the PAIRING (source implies
+# require) also catches a hand-rolled or subtly broken inline guard.
+for f in "$SKILL"/Workflows/*.md; do
+  grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*resolve-config\.sh' "$f" || continue
+  grep -q 'ntfy_require_config' "$f" || bad "workflow sources resolver without ntfy_require_config: $f"
+done
+
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

@@ -83,4 +83,21 @@ assert_eq "absolute untouched" "/a/b"   "$(in_env 'ntfy_expand_home "/a/b"')"
 assert_eq "~user unsupported, untouched" "~other/x" "$(in_env 'ntfy_expand_home "~other/x"')"
 cleanup
 
+echo "L8: ntfy_require_config refuses an unresolved identity, loudly (issue #8)"
+new_env
+jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \
+  && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
+mkdir -p "$ROOT/fakerepo"
+req() { ( export NTFY_HOME="$ROOT" CLAUDE_PROJECT_DIR="$ROOT/fakerepo"; cd /; . "$RESOLVER" >/dev/null 2>&1; ntfy_require_config ); }
+# opt-in host, in a repo with no identity config: source none -> gate refuses
+assert_false "gate refuses source=none"  req
+gate_err=$( req 2>&1 >/dev/null ) || true
+case "$gate_err" in
+  *"refusing to act on the bus"*) pass "gate says why, on stderr" ;;
+  *) fail "gate says why, on stderr (got: '$gate_err')" ;;
+esac
+# resolved identity (host-global, outside any repo) -> gate passes
+assert_true  "gate passes when resolved" in_env 'ntfy_require_config'
+cleanup
+
 finish

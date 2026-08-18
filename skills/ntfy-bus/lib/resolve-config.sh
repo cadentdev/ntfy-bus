@@ -145,5 +145,20 @@ ntfy_daemon_pidfile() { # $1 = config path -> the daemon's pidfile; empty = not 
   return 0
 }
 
+# Caller-side gate for the contract above (issue #8): anything about to ACT on
+# the bus calls this immediately after sourcing and STOPS on failure — never
+# substitutes an identity of its own. The resolver declining to guess is only
+# half the fix; a caller that proceeds with four empty variables ends up in
+# exactly the position that produced the original incident, where the most
+# plausible "repair" is supplying an identity from somewhere else. A comment is
+# not a gate; this is (pairing enforced by bin/check.sh section 8).
+ntfy_require_config() {
+  if [ -z "${NTFY_CONFIG:-}" ] || [ ! -f "${NTFY_CONFIG:-}" ]; then
+    echo "ntfy-bus: identity UNRESOLVED (source: ${NTFY_IDENTITY_SOURCE:-none}) — refusing to act on the bus. Do NOT substitute or guess an identity; run the Setup workflow to configure one for this context." >&2
+    return 1
+  fi
+  return 0
+}
+
 # Auto-resolve when sourced so callers can use "$NTFY_CONFIG" immediately.
 ntfy_resolve_config

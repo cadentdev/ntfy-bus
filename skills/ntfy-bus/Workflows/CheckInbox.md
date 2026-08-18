@@ -10,6 +10,10 @@ Resolve the config path through the shared guard, then extract fields:
 # Host-locked (LifeOS) hosts always get the host-global config; vanilla opt-in
 # hosts get the repo-local config when present.
 . "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# GATE (issue #8): an unresolved identity refuses here, loudly. If this exits,
+# STOP the workflow — do not source another config or improvise an identity;
+# run the Setup workflow instead.
+ntfy_require_config || exit 1
 CONFIG="$NTFY_CONFIG"
 AGENT_ID=$(jq -r '.agent_id' "$CONFIG")
 RECIPIENT_FILTERS=$(jq -c '.recipient_filters' "$CONFIG")

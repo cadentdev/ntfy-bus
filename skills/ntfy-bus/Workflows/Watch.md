@@ -10,6 +10,10 @@ For quick interactive monitoring during a session:
 set -a; . "$HOME/.env" 2>/dev/null; . "$HOME/.claude/.env" 2>/dev/null; set +a
 # Resolve identity via the shared guard (host-locked LifeOS vs vanilla per-repo).
 . "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# GATE (issue #8): an unresolved identity refuses here, loudly. If this exits,
+# STOP the workflow — do not source another config or improvise an identity;
+# run the Setup workflow instead.
+ntfy_require_config || exit 1
 . "$HOME/.claude/skills/ntfy-bus/lib/routing.sh"   # shared pointer-agnostic matcher
 CONFIG="$NTFY_CONFIG"
 ENDPOINT=$(jq -r '.endpoint' "$CONFIG")
