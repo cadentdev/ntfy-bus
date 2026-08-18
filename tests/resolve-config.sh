@@ -80,16 +80,27 @@ as_daemon() { ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PRO
 mkdir -p "$ROOT/norepo"
 assert_eq "unlocked, marked daemon, no repo: host-global" "host-global" "$(as_daemon 'printf %s "$NTFY_IDENTITY_SOURCE"')"
 marked_err=$( ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" 2>&1 >/dev/null ) )
-case "$marked_err" in
-  *WARNING*) fail "marked daemon resolves silently (got: '$marked_err')" ;;
-  *) pass "marked daemon resolves silently" ;;
-esac
+# Pin true silence, not just absence of the word WARNING — any stderr on the
+# marked host-global path is a regression (review finding on PR #40).
+if [ -z "$marked_err" ]; then
+  pass "marked daemon resolves silently"
+else
+  fail "marked daemon resolves silently (got: '$marked_err')"
+fi
 assert_eq "unlocked, UNMARKED, no repo: REFUSED (phase 2, issue #37)" "none" "$(no_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
 assert_eq "unlocked, UNMARKED, no repo: empty config path" "" "$(no_repo 'printf %s "$NTFY_CONFIG"')"
 # The refusal must not abort set-e callers at source time (the poller sources
 # this resolver from cwd=/ and only THEN cds into NTFY_POLL_REPO to re-resolve
 # — a non-zero auto-resolve here would kill capture on every opt-in host).
-sete_source_ok() { ( set -e; export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; true ); }
+# Probe in a SEPARATE bash process: inside assert_true's `if "$@"` context the
+# harness shell disables errexit for the whole call tree, so an in-harness
+# subshell with `set -e` can never catch this regression (a return-1 refusal
+# would still pass). The child process's own errexit is unaffected.
+sete_source_ok() {
+  ( unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT
+    NTFY_HOME="$ROOT" ROOT="$ROOT" RESOLVER="$RESOLVER" \
+      bash -c 'set -e; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1' )
+}
 assert_true "unmarked refusal still returns 0 (set-e-safe source)" sete_source_ok
 unmarked_err=$( ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT; cd "$ROOT/norepo"; . "$RESOLVER" 2>&1 >/dev/null ) )
 case "$unmarked_err" in

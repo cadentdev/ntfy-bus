@@ -260,6 +260,10 @@ If you can run this and see your own message come back, the install is good:
 # 1. Resolve identity + auth exactly the way every workflow does
 set -a; . "$HOME/.env" 2>/dev/null; . "$HOME/.claude/.env" 2>/dev/null; set +a
 . "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"   # sets $NTFY_CONFIG
+ntfy_require_config || exit 1   # STOP on an unresolved identity — never guess one.
+                                # From a non-repo cwd (cron, a bare shell) an opt-in
+                                # host refuses without NTFY_DAEMON_CONTEXT=1 or a
+                                # CLAUDE_PROJECT_DIR naming the identity's repo.
 CONFIG="$NTFY_CONFIG"
 AGENT_ID=$(jq -r '.agent_id'          "$CONFIG")
 ENDPOINT=$(jq -r '.endpoint'          "$CONFIG")
@@ -311,7 +315,7 @@ Filtering is not a naive substring match. It sources `lib/routing.sh` — the si
 Long-poll for traffic as it arrives.
 
 - **Foreground** (`curl` streaming `${ENDPOINT}/${TOPIC}/json` piped through the shared matcher) — for live debugging in a session. Ctrl-C to exit.
-- **Background** — this skill does *not* install a daemon. On hosts with systemd, the optional waker daemon (see Installation) follows the watcher's JSONL. On vanilla hosts, a cron poll or a tmux pane running the foreground command is the pragmatic answer.
+- **Background** — this skill does *not* install a daemon. On hosts with systemd, the optional waker daemon (see Installation) follows the watcher's JSONL. On vanilla hosts, a cron poll or a tmux pane running the foreground command is the pragmatic answer — but on an opt-in host the cron line must declare its identity (`NTFY_DAEMON_CONTEXT=1` for host-global, or `CLAUDE_PROJECT_DIR=/path/to/repo` for a repo's), because an unmarked outside-repo run refuses to resolve.
 
 ### The pointer character
 

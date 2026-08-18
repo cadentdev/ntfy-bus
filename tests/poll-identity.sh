@@ -18,6 +18,12 @@ set -u
 . "$(dirname "$0")/lib/harness.sh"
 POLLER="$SKILL_ROOT/daemons/ntfy-poll-to-jsonl.sh"
 
+# The surrounding session must never leak into a case: an inherited
+# CLAUDE_PROJECT_DIR changes which resolver branch the poller's initial
+# source takes, and NTFY_DAEMON_CONTEXT silences the outside-repo refusal
+# these fixtures deliberately cross (review finding on PR #40).
+unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT
+
 # Point auth at var names no real env file carries (see header).
 unique_auth() {
   jq '.auth_env = {"username":"TESTBUS_POLL_USER","password":"TESTBUS_POLL_PASS"}' \

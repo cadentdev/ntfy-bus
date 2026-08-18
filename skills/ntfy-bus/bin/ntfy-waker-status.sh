@@ -77,7 +77,11 @@ SKILL_DIR=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P
 . "$SKILL_DIR/lib/resolve-config.sh"
 
 [ -f "${NTFY_CONFIG:-}" ] || {
-  echo "FATAL: config missing/unresolved at ${NTFY_CONFIG:-unresolved} — run the Setup workflow" >&2
+  if [ "${NTFY_IDENTITY_SOURCE:-none}" = "none" ]; then
+    echo "FATAL: identity UNRESOLVED (source none) — cd into the repo whose identity you want to inspect (opt-in hosts refuse an unmarked outside-repo resolution, issue #37); daemons set NTFY_DAEMON_CONTEXT=1 instead" >&2
+  else
+    echo "FATAL: config missing/unresolved at ${NTFY_CONFIG:-unresolved} — run the Setup workflow" >&2
+  fi
   exit 1
 }
 

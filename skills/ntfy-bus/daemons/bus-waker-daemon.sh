@@ -52,7 +52,17 @@ LIB_DIR="$SELF_DIR/../lib"
 . "$LIB_DIR/dedup.sh"          || { echo "FATAL: cannot source dedup.sh" >&2; exit 1; }
 . "$LIB_DIR/capabilities.sh"   || { echo "FATAL: cannot source capabilities.sh" >&2; exit 1; }
 
-[ -f "$NTFY_CONFIG" ] || { echo "FATAL: no host config at $NTFY_CONFIG — run the Setup workflow" >&2; exit 1; }
+# Source-aware refusal: "run Setup" is the WRONG remedy for an unresolved
+# identity (issue #37 — an unmarked daemon outside a repo on an opt-in host);
+# the fix there is the unit file, not onboarding.
+if [ ! -f "${NTFY_CONFIG:-}" ]; then
+  if [ "${NTFY_IDENTITY_SOURCE:-none}" = "none" ]; then
+    echo "FATAL: identity UNRESOLVED (source none) — this daemon declared no identity. Set NTFY_DAEMON_CONTEXT=1 in its installed unit to run as the host-global identity (the shipped templates do), or CLAUDE_PROJECT_DIR=/path/to/repo to run as a repo's." >&2
+  else
+    echo "FATAL: no host config at $NTFY_CONFIG — run the Setup workflow" >&2
+  fi
+  exit 1
+fi
 
 # Fail LOUD on missing identity: a waker that silently filters on the wrong
 # agent is worse than one that refuses to start.
