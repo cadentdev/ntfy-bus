@@ -21,6 +21,11 @@ After=ntfy-bridge-watcher.service
 
 [Service]
 Type=simple
+# Declares DAEMON CONTEXT explicitly (issue #9): on an opt-in host the resolver
+# takes the host-global identity outside a repo only for marked daemons —
+# without this line the daemon logs a migration warning today and will refuse
+# to resolve in a future release.
+Environment=NTFY_DAEMON_CONTEXT=1
 ExecStart=%h/.claude/skills/ntfy-bus/daemons/bus-waker-daemon.sh
 Restart=always
 RestartSec=5

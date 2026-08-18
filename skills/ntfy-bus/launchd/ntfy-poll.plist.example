@@ -51,6 +51,9 @@
         <string>__HOME__</string>
         <key>PATH</key>
         <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin</string>
+        <!-- Declares DAEMON CONTEXT explicitly (issue #9). Keep this key. -->
+        <key>NTFY_DAEMON_CONTEXT</key>
+        <string>1</string>
         <!-- NTFY_POLL_REPO selects which repo's identity to poll as. -->
         <key>NTFY_POLL_REPO</key>
         <string>__REPO__</string>
