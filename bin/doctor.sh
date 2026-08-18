@@ -14,8 +14,10 @@ bus_resolve() {
 REPO=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
 SKILL_LINK="$HOME/.claude/skills/ntfy-bus"
 warn=0
-ok()  { printf 'ok    %s\n' "$*"; }
-bad() { printf 'DRIFT %s\n' "$*"; warn=1; }
+ok()   { printf 'ok    %s\n' "$*"; }
+bad()  { printf 'DRIFT %s\n' "$*"; warn=1; }
+# A finding worth acting on that must not fail the run (exit stays healthy).
+note() { printf 'warn  %s\n' "$*"; }
 
 # 1. skill path resolves into this repo
 if [ -e "$SKILL_LINK/SKILL.md" ]; then
@@ -53,12 +55,16 @@ fi
 
 # 4. shadow scan: known bus-component basenames living outside repo-owned homes.
 # Allowlist of legitimately host-local files; everything else matching is drift.
-# ~/.local/bin is scanned and symlinks match: the shadows found in
-# the wild lived in ~/.local/bin, and one was a stow-managed symlink — a scan
-# limited to ~/.claude/{bin,hooks} regular files reported clean on both hosts.
+# ~/.local/bin is scanned WITH -L: both symlinked ENTRIES (a stow-managed shadow
+# script) and a symlinked START POINT (a stow-managed ~/.local/bin itself) must
+# be followed — without -L, find treats a symlinked root as a symlink, never
+# descends, and reports a false all-clear on exactly the tidier dotfiles hosts
+# (issue #13). -maxdepth 1 bounds the traversal, so the usual -L cycle concern
+# does not apply; a broken symlink is still -type l under -L, so broken-link
+# shadows still surface.
 # /ntfy alone is the standalone ntfy client binary, not a bus component.
 ALLOW='ntfy-bus.config.json|ntfy-inbox.jsonl|.bus-wake.log|.bus-wake.seen-ids|bus-wake-notify.sh|bus-waker.service|ntfy-bus.waker.pid|ntfy-bus.wake.log|ntfy-bus.seen-ids|/ntfy'
-shadows=$(find "$HOME/.claude/bin" "$HOME/.claude/hooks" "$HOME/.local/bin" -maxdepth 1 \
+shadows=$(find -L "$HOME/.claude/bin" "$HOME/.claude/hooks" "$HOME/.local/bin" -maxdepth 1 \
   \( -type f -o -type l \) \
   \( -name '*bus-wak*' -o -name '*bus-monitor*' -o -name '*ntfy*' \) 2>/dev/null \
   | grep -vE "($ALLOW)$")
@@ -66,6 +72,29 @@ if [ -n "$shadows" ]; then
   printf 'DRIFT host-local bus code shadowing canonical (fold in or allowlist):\n%s\n' "$shadows"; warn=1
 else
   ok "no host-local shadows of canonical components"
+fi
+
+# 5. tracking state of the identity config in the repo doctor is run FROM.
+# A tracked .claude/ntfy-bus.config.json ships a live fleet identity to
+# everyone who clones — the first clone to run a workflow sends and arms wakers
+# AS that agent. check.sh section 7 guards only the canonical repo; identity
+# configs live in OTHER repos by design, and this host probe is what reaches
+# them (issue #19). git-guarded: outside a work tree there is no tracking state
+# to check, and a config there is legitimately just a file (see #9 — the
+# not-a-git-repo case is load-bearing on this fleet). Ignore state comes from
+# `git check-ignore -v`, not a .gitignore grep: the rule may live in a GLOBAL
+# ignore file, which protects this machine and NOT a fresh clone — so the
+# report names where the rule came from.
+cwd_repo=$(git rev-parse --show-toplevel 2>/dev/null) || cwd_repo=""
+if [ -n "$cwd_repo" ] && [ -f "$cwd_repo/.claude/ntfy-bus.config.json" ]; then
+  rel=".claude/ntfy-bus.config.json"
+  if git -C "$cwd_repo" ls-files --error-unmatch "$rel" >/dev/null 2>&1; then
+    bad "identity config is TRACKED in $cwd_repo — every clone becomes this agent. Untrack it (git -C \"$cwd_repo\" rm --cached $rel), add an ignore rule, and treat the identity as disclosed to anyone with clone access (rotating the agent name is the conservative move)."
+  elif rule=$(git -C "$cwd_repo" check-ignore -v "$rel" 2>/dev/null); then
+    ok "identity config untracked + ignored (rule: ${rule%%	*})"
+  else
+    note "identity config in $cwd_repo is untracked but NOT ignored — one 'git add .' away from tracked. Add $rel to $cwd_repo/.git/info/exclude (instant, this clone) and consider a tracked .gitignore entry (protects every clone)."
+  fi
 fi
 
 exit "$warn"
