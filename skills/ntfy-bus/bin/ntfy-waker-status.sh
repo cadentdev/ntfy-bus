@@ -88,7 +88,7 @@ ME=$(jq -r '.agent_id // empty' "$NTFY_CONFIG" 2>/dev/null)
 # one host's filesystem layout and silently report on the wrong files.
 INBOX=$(jq -r '.inbox_jsonl // ""' "$NTFY_CONFIG" 2>/dev/null)
 if [ -z "$INBOX" ]; then
-  echo "FATAL: .inbox_jsonl missing/empty in $NTFY_CONFIG — state paths are per-machine config, not code defaults" >&2
+  echo "FATAL: .inbox_jsonl missing/empty in $NTFY_CONFIG — state paths are per-host config, not code defaults" >&2
   exit 1
 fi
 INBOX=$(ntfy_expand_home "$INBOX")

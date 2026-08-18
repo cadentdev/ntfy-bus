@@ -16,7 +16,7 @@
 # IDENTITY: entirely from the resolved host config (lib/resolve-config.sh).
 # No agent name is hardcoded here; this file is host-agnostic by construction.
 #
-# CONFIG (host-global ntfy-bus.config.json — one source of truth per machine):
+# CONFIG (host-global ntfy-bus.config.json — one source of truth per host):
 #   .recipient_filters      -> wake filters (joined with |); REQUIRED (or .agent_id)
 #   .agent_id               -> self-skip (lowercased);       REQUIRED
 #   .inbox_jsonl            -> inbox path; REQUIRED (arg $1 overrides)
@@ -27,7 +27,7 @@
 #   .waker.startup_tail     -> catch-up window on (re)start (default 200)
 #   .waker.notify_hook      -> optional notify hook (not state; has a default)
 #
-# STATE PATHS HAVE NO DEFAULTS. A state path is a per-machine fact; shared code
+# STATE PATHS HAVE NO DEFAULTS. A state path is a per-host fact; shared code
 # carrying one is exactly the leak class the state-path doctrine forbids (bin/check.sh section 6
 # enforces this). Missing/empty => FATAL with a pointer to the migration note.
 # A leading "~/" in any config path is expanded to $HOME.
@@ -67,7 +67,7 @@ NOISE=$(jq -r '.waker.noise_senders // "gate|uptime|backup|nightly|cron|mirror|a
 STARTUP_TAIL=$(jq -r '.waker.startup_tail // 200' "$NTFY_CONFIG")
 
 fatal_missing() {
-  echo "FATAL: $1 missing/empty in $NTFY_CONFIG — state paths are per-machine config, not code defaults. See README 'Config migration: state paths + pidfile'." >&2
+  echo "FATAL: $1 missing/empty in $NTFY_CONFIG — state paths are per-host config, not code defaults. See README 'Config migration: state paths + pidfile'." >&2
   exit 1
 }
 INBOX="${1:-$(jq -r '.inbox_jsonl // ""' "$NTFY_CONFIG")}"

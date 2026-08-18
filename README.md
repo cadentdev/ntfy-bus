@@ -20,7 +20,7 @@ Optional components (activated per host, all config-driven):
 
 - **Waker daemon** (`daemons/bus-waker-daemon.sh` + `systemd/bus-waker.service`) — durable, reaper-immune wake detector for systemd hosts. Follows the JSONL inbox, dedups by ntfy `.id` (`lib/dedup.sh`), logs wakes, fires an optional notify hook. NOTIFY-and-record only: a systemd process cannot re-invoke an idle in-session agent. Identity comes entirely from the host config — no agent name in the code.
 - **Durable capture + in-session waker** (`daemons/ntfy-poll-to-jsonl.sh`, `daemons/ntfy-bus-waker.sh`, `hooks/arm-bus-waker.sh`) — the end-to-end receive path for hosts without a LifeOS systemd watcher. A scheduled poller (`ntfy-poll-to-jsonl.sh`, run by launchd on macOS or a systemd timer/cron on Linux) appends new bus messages to the per-agent JSONL inbox. The in-session waker (`ntfy-bus-waker.sh`) tails that inbox and *exits* on the first message addressed to the agent, which is what re-invokes an idle in-session Claude agent (the systemd daemon above can only notify). The SessionStart hook (`arm-bus-waker.sh`) detects a down waker and prompts the agent to re-arm it via the harness-tracked path. Identity comes entirely from host config.
-- **Statusline segment** (`statusline/bus-segment.sh`) — emits `BUS: ⏻ armed` / `BUS: ⏚ DOWN` for the host statusline. Whether it appears, its label/icons, and what "armed" means (systemd daemon, in-session pidfile waker, or either) are all per-machine config.
+- **Statusline segment** (`statusline/bus-segment.sh`) — emits `BUS: ⏻ armed` / `BUS: ⏚ DOWN` for the host statusline. Whether it appears, its label/icons, and what "armed" means (systemd daemon, in-session pidfile waker, or either) are all per-host config.
 - **Enforcement and host tooling** (repo-root `bin/`, plus repo `CLAUDE.md` doctrine) — keeps fleet code born-canonical and makes host state legible. See [Repo tooling (`bin/`)](#repo-tooling-bin).
 
 ## One config file per host (doctrine)
@@ -191,7 +191,7 @@ Crash-loop symptoms show as a nonzero last-exit status in `launchctl list` and
 there are two supported shapes:
 
 - **Single-identity host (the common case):** the daemon reads the
-  **host-global** config, which carries the only `waker` block on the machine.
+  **host-global** config, which carries the only `waker` block on the host.
   Repo-local identity configs on such a host carry no `waker` block — don't
   launch the daemon from inside such a repo's working directory, or config
   resolution will hand it the repo-local file and it will fail loud.
@@ -209,7 +209,7 @@ The daemon **writes its PID to `.waker.pidfile` on start** (removed on exit) —
 
 ### Config migration: state paths + pidfile
 
-**State paths have no code defaults** (enforced by `bin/check.sh` section 6): a state path is a per-machine fact and lives only in the per-machine config. The daemon **fails loud** — refuses to start with a `FATAL:` naming the missing key — if any of these four are missing or empty: `inbox_jsonl`, `waker.pidfile`, `waker.wakelog`, `waker.seen_ids`. A leading `~/` in any of them is expanded to `$HOME`.
+**State paths have no code defaults** (enforced by `bin/check.sh` section 6): a state path is a per-host fact and lives only in the per-host config. The daemon **fails loud** — refuses to start with a `FATAL:` naming the missing key — if any of these four are missing or empty: `inbox_jsonl`, `waker.pidfile`, `waker.wakelog`, `waker.seen_ids`. A leading `~/` in any of them is expanded to `$HOME`.
 
 Fresh installs get working values from `config.example.json` via the Setup workflow. **Existing hosts must add the new/newly-required keys once** — merge (adjust paths to taste, keep your current wakelog/seen-ids paths if you already have them):
 
@@ -233,7 +233,7 @@ seg=$("$HOME/.claude/skills/ntfy-bus/statusline/bus-segment.sh")
 [ -n "$seg" ] && printf ' | %s' "$seg"   # position + colors are YOUR statusline's choice
 ```
 
-Per-machine control, all in the one config file: `statusline.enabled` (whether it appears at all), `label` / `icon_armed` / `icon_down` (appearance), `show_when_down` (hide the DOWN state), and `waker.mode` (what "armed" means on this machine: `systemd`, `pidfile`, `auto` = either).
+Per-host control, all in the one config file: `statusline.enabled` (whether it appears at all), `label` / `icon_armed` / `icon_down` (appearance), `show_when_down` (hide the DOWN state), and `waker.mode` (what "armed" means on this host: `systemd`, `pidfile`, `auto` = either).
 
 ## Usage
 
@@ -325,11 +325,11 @@ All four workflows resolve the identity config through one shared guard (`lib/re
 
 ### Host-locked (LifeOS hosts, and unconfigured vanilla hosts)
 
-If `~/.claude/PAI/` exists (the LifeOS marker directory — its on-disk name predates the rebrand) OR the host-global config does NOT set `per_repo_identity_allowed: true`, the host is **locked**: every workflow reads `~/.claude/ntfy-bus.config.json` and any repo-local identity config is ignored. There is one identity per machine, and it cannot be overridden by a cloned repo. This is the default-safe polarity — a fresh host you never reconfigured is locked.
+If `~/.claude/PAI/` exists (the LifeOS marker directory — its on-disk name predates the rebrand) OR the host-global config does NOT set `per_repo_identity_allowed: true`, the host is **locked**: every workflow reads `~/.claude/ntfy-bus.config.json` and any repo-local identity config is ignored. There is one identity per host, and it cannot be overridden by a cloned repo. This is the default-safe polarity — a fresh host you never reconfigured is locked.
 
 ### Vanilla opt-in (per-repo identity)
 
-If a vanilla host's host-global config sets `per_repo_identity_allowed: true`, repo-local identity is unlocked: workflows prefer `<repo>/.claude/ntfy-bus.config.json` when present, falling back to host-global otherwise. This lets one machine carry per-repo identities — e.g. one repo sends as `Alice` while a sibling repo posts as its own agent.
+If a vanilla host's host-global config sets `per_repo_identity_allowed: true`, repo-local identity is unlocked: inside a repo, `<repo>/.claude/ntfy-bus.config.json` **is** the identity, and a repo without one resolves to **nothing** — `NTFY_IDENTITY_SOURCE=none`, empty `NTFY_CONFIG`, and every workflow refuses to act (`ntfy_require_config`). There is deliberately **no host-global fallback inside a repo**: falling back means acting as an agent the repo never named, which is an identity hijack by omission. The host-global config is used only outside any repo, in **explicit daemon context** — the shipped systemd/launchd unit templates set `NTFY_DAEMON_CONTEXT=1`; without that marker an outside-repo resolution warns today and will refuse in a future release. This lets one host carry per-repo identities — e.g. one repo sends as `Alice` while a sibling repo posts as its own agent — while durable notification keeps running under the host's own name.
 
 ### Why locked is the default
 
@@ -343,19 +343,19 @@ It is worth being precise, because a security property you misunderstand is wors
 
 **It does not defend against** a compromised host-global config, a modified resolver, or anyone simply calling `curl` against the ntfy topic directly. Identity here is a routing convention, not an authenticated claim — the Title is a string the sender asserts about itself. Every agent shares one set of ntfy credentials; the bus assumes a trusted set of hosts and defends the boundary *between repos on those hosts*, not the boundary between the fleet and the world. If you need cryptographic sender authentication, this design does not give it to you.
 
-**There is no fourth install path.** LifeOS host + per-repo identity does not exist, by design — LifeOS hosts are always locked, and that is the security property the resolver enforces. The three paths are: LifeOS host (locked), vanilla host with one machine-wide identity, and vanilla host with per-repo identity (explicit opt-in).
+**There is no fourth install path.** LifeOS host + per-repo identity does not exist, by design — LifeOS hosts are always locked, and that is the security property the resolver enforces. The three paths are: LifeOS host (locked), vanilla host with one host-wide identity, and vanilla host with per-repo identity (explicit opt-in).
 
 ### Generating the configs
 
 Run the `Setup` workflow — it detects host class and writes the right shape:
 
 - LifeOS hosts: writes ONLY `~/.claude/ntfy-bus.config.json` (host-global). Refuses to write a repo-local config even if asked.
-- Vanilla hosts: prompts host-global-vs-per-repo at Step 0. Per-repo mode writes the tracked `<repo>/.claude/ntfy-bus.config.json` PLUS an untracked `<repo>/.claude/settings.local.json` (the hook wiring with the machine-specific bun path) PLUS a `.gitignore` entry.
+- Vanilla hosts: prompts host-global-vs-per-repo at Step 0. Per-repo mode writes the **untracked, per-contributor** `<repo>/.claude/ntfy-bus.config.json` and fences it immediately via `.git/info/exclude` (with a tracked `.gitignore` entry as the every-clone follow-up). **Never commit the identity config** — a tracked config ships a live fleet identity to everyone who clones, `bin/check.sh` §7 fails on it, and `bin/doctor.sh` flags it on any host. The BridgeBodyGuard hook is wired once, host-globally, in `~/.claude/settings.json`.
 
 Or copy the example files manually:
 
 - `config.example.json` — the host-global schema (includes the `per_repo_identity_allowed` toggle)
-- `config.repo-local.example.json` — the tracked per-repo schema (no toggle field; the toggle only lives host-global)
+- `config.repo-local.example.json` — the per-repo schema (no toggle field; the toggle only lives host-global). Written **untracked**, per-contributor — see above.
 
 Secrets (`NTFY_USERNAME` / `NTFY_PASSWORD`) live in `~/.env` or `~/.claude/.env` and are referenced **by name** in the config. The config files carry no values. Use `.env.example` as a template:
 
@@ -442,7 +442,7 @@ The canonical install pattern puts the repo at `~/Repos/cadentdev/ntfy-bus` with
 }
 ```
 
-LifeOS hosts are always host-locked (the resolver ignores any repo-local identity), so the hook lives at host-global scope and applies to every Claude Code session on the machine. Updates:
+LifeOS hosts are always host-locked (the resolver ignores any repo-local identity), so the hook lives at host-global scope and applies to every Claude Code session on the host. Updates:
 
 ```bash
 git -C ~/Repos/cadentdev/ntfy-bus pull --rebase
@@ -473,7 +473,7 @@ Updates: `git -C ~/.claude/skills/ntfy-bus pull --rebase`.
 The `Setup` workflow handles this end-to-end. Run it (`Skill("ntfy-bus")` → Setup) and choose per-repo at Step 0. Setup writes three things:
 
 1. **Tracked** `<repo>/.claude/ntfy-bus.config.json` — the repo's bus identity. Travels with the repo when other hosts clone it. No secrets (creds are env-var names).
-2. **Untracked** `<repo>/.claude/settings.local.json` — the hook wiring entry, parameterized to the machine's bun interpreter path (e.g. `~/.bun/bin/bun` vs `/opt/homebrew/bin/bun`). Different on every host, so it stays out of git.
+2. **Untracked** `<repo>/.claude/settings.local.json` — the hook wiring entry, parameterized to the host's bun interpreter path (e.g. `~/.bun/bin/bun` vs `/opt/homebrew/bin/bun`). Different on every host, so it stays out of git.
 3. A `.gitignore` entry for `settings.local.json` so it can never be tracked by accident.
 
 If you'd rather wire the hook by hand without the Setup workflow, see `Workflows/Setup.md` Step 6b for the jq-merge that adds the settings entry idempotently (re-running the merge against the same `settings.local.json` is a no-op).
@@ -554,7 +554,7 @@ Workflows doc-drift checks.
 - **Per-host config outside the repo** — agent identity and inbox path differ per host. The split is the actual important boundary, not the repo split.
 - **No LifeOS dependency in the skill itself** — works on a clean vanilla Claude Code install.
 - **Host-locked by default** — LifeOS hosts (and unconfigured vanilla hosts) always read their host-global identity; repo-local identity is ignored. This prevents one specific vector: an untrusted repo's checked-in `.claude/ntfy-bus.config.json` making a locked host impersonate another agent on its first clone+run. (It does NOT defend against a compromised host-global config, a modified resolver, or direct `curl` to ntfy — those are outside this guard's scope.) Opting INTO per-repo identity is explicit (`per_repo_identity_allowed: true` in the host-global config); the locked state is implicit.
-- **Per-repo identity on vanilla (opt-in)** — when a vanilla host unlocks per-repo mode, the atomic unit of identity becomes the repo, not the machine. One machine can carry two repos with two identities simultaneously, with the bus correctly attributing each via the Title-routing convention.
+- **Per-repo identity on vanilla (opt-in)** — when a vanilla host unlocks per-repo mode, the atomic unit of identity becomes the repo, not the host. One host can carry two repos with two identities simultaneously, with the bus correctly attributing each via the Title-routing convention.
 
 ## License
 

@@ -58,7 +58,7 @@ ID=$(jq -r '.agent_id // .recipient_filters[0] // empty' "$NTFY_CONFIG" 2>/dev/n
 # waker uses, or armed-state detection silently diverges from reality.
 INBOX=$(jq -r '.inbox_jsonl // ""' "$NTFY_CONFIG")
 if [ -z "$INBOX" ]; then
-  echo "[bus-waker] Config $NTFY_CONFIG has no .inbox_jsonl — state paths are per-machine config, not code defaults. Bus wake is OFF until it is set (see README config migration)."
+  echo "[bus-waker] Config $NTFY_CONFIG has no .inbox_jsonl — state paths are per-host config, not code defaults. Bus wake is OFF until it is set (see README config migration)."
   exit 0
 fi
 INBOX=$(ntfy_expand_home "$INBOX")

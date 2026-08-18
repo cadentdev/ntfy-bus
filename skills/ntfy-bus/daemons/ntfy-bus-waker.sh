@@ -46,7 +46,7 @@ set -u
 # silently mislabel every non-default agent. .recipient_filters[0] is only a
 # pre-backfill fallback; it's a filter list, not an identity.
 # Config is required regardless of how identity arrives: the inbox path and
-# wake filters are per-machine config, not code defaults (a recurring defect class here).
+# wake filters are per-host config, not code defaults (a recurring defect class here).
 #
 # Libs resolve relative to this file's REAL location — the same
 # symlink-safe bootstrap bus-waker-daemon.sh uses, byte-identical by gate
@@ -86,7 +86,7 @@ id_lc="$(echo "$ME" | tr '[:upper:]' '[:lower:]')"
 # (e.g. ~/.claude/ntfy-inbox.<agent>.jsonl); the path never lives in code.
 INBOX=$(jq -r '.inbox_jsonl // ""' "$NTFY_CONFIG")
 if [ -z "$INBOX" ]; then
-  echo "FATAL: .inbox_jsonl missing/empty in $NTFY_CONFIG — state paths are per-machine config, not code defaults" >&2
+  echo "FATAL: .inbox_jsonl missing/empty in $NTFY_CONFIG — state paths are per-host config, not code defaults" >&2
   exit 1
 fi
 INBOX=$(ntfy_expand_home "$INBOX")

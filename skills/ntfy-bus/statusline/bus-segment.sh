@@ -14,11 +14,11 @@
 #   .statusline.show_when_down false -> silent when down (still exit 1)
 #   .waker.mode                auto | systemd | pidfile | none  (default auto)
 #   .waker.systemd_unit        default "bus-waker.service"
-#   .waker.pidfile             NO default — per-machine fact, config-only;
+#   .waker.pidfile             NO default — per-host fact, config-only;
 #                              unset => the pidfile probe is UNAVAILABLE
 #   .waker.cmdline_match       default "bus-waker-daemon" (the shipped artifact's
 #                              own name); hosts running their OWN wakers add
-#                              those names in per-machine config
+#                              those names in per-host config
 #
 # mode=auto: armed if ANY waker (durable systemd daemon OR in-session pidfile
 # waker) is up. Pin mode=pidfile to keep "armed == in-session waker" semantics.
@@ -70,8 +70,8 @@ PIDFILE=$(ntfy_expand_home "$PIDFILE")
 # forbids and the hardcoded-home ban does not catch ($HOME-relative slips it).
 # Nothing in THIS repo writes that file, so the default made pidfile_armed()
 # stat a path that never exists on a clean install: a permanently-false branch
-# that reported DOWN on a healthy host. A pidfile path is a per-machine fact and
-# belongs in the per-machine config (.waker.pidfile), not in shared code.
+# that reported DOWN on a healthy host. A pidfile path is a per-host fact and
+# belongs in the per-host config (.waker.pidfile), not in shared code.
 # RESOLVED: the shipped daemon now WRITES .waker.pidfile (fail-loud if
 # unset), so on macOS — no systemd — a clean install CAN report "armed": set
 # .waker.pidfile in the host config and this probe becomes the real answer.
