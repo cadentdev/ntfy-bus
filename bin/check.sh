@@ -118,9 +118,12 @@ t=$(git -C "$REPO" ls-files -- '.claude/ntfy-bus.config.json' '*/.claude/ntfy-bu
 # NTFY_CONFIG as unconfigured and refuse — but a stated contract is a comment,
 # and a comment is not a gate. Gating on the PAIRING (source implies
 # require) also catches a hand-rolled or subtly broken inline guard.
-for f in "$SKILL"/Workflows/*.md; do
+# README's copy-paste snippets are consumers too (its "From the shell" section
+# advertises cron and daemons — the exact contexts issue #37 changed), so the
+# pairing gate covers it alongside the Workflows.
+for f in "$SKILL"/Workflows/*.md "$REPO/README.md"; do
   grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*resolve-config\.sh' "$f" || continue
-  grep -q 'ntfy_require_config' "$f" || bad "workflow sources resolver without ntfy_require_config: $f"
+  grep -q 'ntfy_require_config' "$f" || bad "doc sources resolver without ntfy_require_config: $f"
 done
 
 # 9. docs must not re-teach the pre-PR#7 fallback model (issue #10): the

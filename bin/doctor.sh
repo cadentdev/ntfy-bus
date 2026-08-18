@@ -49,6 +49,10 @@ fi
 . "$REPO/skills/ntfy-bus/lib/resolve-config.sh" 2>/dev/null
 if [ -f "${NTFY_CONFIG:-}" ] && jq -e '.agent_id' "$NTFY_CONFIG" >/dev/null 2>&1; then
   ok "config parses, identity: $(jq -r .agent_id "$NTFY_CONFIG") (source: ${NTFY_IDENTITY_SOURCE:-?})"
+elif [ "${NTFY_IDENTITY_SOURCE:-}" = "none" ]; then
+  # "run Setup" cannot fix an unresolved identity (issue #37): the remedy is
+  # naming one — a repo cwd, CLAUDE_PROJECT_DIR, or the daemon marker.
+  bad "identity UNRESOLVED (source none) — run doctor from inside the identity's repo; daemons set NTFY_DAEMON_CONTEXT=1 in their unit"
 else
   bad "config missing/unparseable at ${NTFY_CONFIG:-unresolved} — run the Setup workflow"
 fi

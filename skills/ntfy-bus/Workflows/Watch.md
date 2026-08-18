@@ -48,7 +48,7 @@ If it's not running but should be, refer the user to the watcher script in their
 
 For vanilla Claude Code hosts that want continuous capture, two options:
 
-1. **Cron polling every N minutes** — schedule the foreground command above with output redirected to a local JSONL file
-2. **tmux pane running the foreground command** — simplest, restarts on Ctrl-C
+1. **Cron polling every N minutes** — schedule the foreground command above with output redirected to a local JSONL file. Cron runs from `$HOME`, outside any repo, and on an opt-in host an unmarked outside-repo run **refuses to resolve** (issue #37) — so the cron line must declare which identity it means: set `NTFY_DAEMON_CONTEXT=1` to poll as the host-global identity (daemon context is explicit), or `CLAUDE_PROJECT_DIR=/path/to/repo` to poll as a repo's identity. Example: `*/5 * * * * NTFY_DAEMON_CONTEXT=1 <command>`
+2. **tmux pane running the foreground command** — simplest, restarts on Ctrl-C; run it from inside the identity's repo so resolution is repo-local
 
 The skill itself doesn't manage the daemon — it just defines the read paths in `CheckInbox`.

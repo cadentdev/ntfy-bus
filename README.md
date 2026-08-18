@@ -260,6 +260,10 @@ If you can run this and see your own message come back, the install is good:
 # 1. Resolve identity + auth exactly the way every workflow does
 set -a; . "$HOME/.env" 2>/dev/null; . "$HOME/.claude/.env" 2>/dev/null; set +a
 . "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"   # sets $NTFY_CONFIG
+ntfy_require_config || exit 1   # STOP on an unresolved identity — never guess one.
+                                # From a non-repo cwd (cron, a bare shell) an opt-in
+                                # host refuses without NTFY_DAEMON_CONTEXT=1 or a
+                                # CLAUDE_PROJECT_DIR naming the identity's repo.
 CONFIG="$NTFY_CONFIG"
 AGENT_ID=$(jq -r '.agent_id'          "$CONFIG")
 ENDPOINT=$(jq -r '.endpoint'          "$CONFIG")
@@ -311,7 +315,7 @@ Filtering is not a naive substring match. It sources `lib/routing.sh` — the si
 Long-poll for traffic as it arrives.
 
 - **Foreground** (`curl` streaming `${ENDPOINT}/${TOPIC}/json` piped through the shared matcher) — for live debugging in a session. Ctrl-C to exit.
-- **Background** — this skill does *not* install a daemon. On hosts with systemd, the optional waker daemon (see Installation) follows the watcher's JSONL. On vanilla hosts, a cron poll or a tmux pane running the foreground command is the pragmatic answer.
+- **Background** — this skill does *not* install a daemon. On hosts with systemd, the optional waker daemon (see Installation) follows the watcher's JSONL. On vanilla hosts, a cron poll or a tmux pane running the foreground command is the pragmatic answer — but on an opt-in host the cron line must declare its identity (`NTFY_DAEMON_CONTEXT=1` for host-global, or `CLAUDE_PROJECT_DIR=/path/to/repo` for a repo's), because an unmarked outside-repo run refuses to resolve.
 
 ### The pointer character
 
@@ -329,7 +333,7 @@ If `~/.claude/PAI/` exists (the LifeOS marker directory — its on-disk name pre
 
 ### Vanilla opt-in (per-repo identity)
 
-If a vanilla host's host-global config sets `per_repo_identity_allowed: true`, repo-local identity is unlocked: inside a repo, `<repo>/.claude/ntfy-bus.config.json` **is** the identity, and a repo without one resolves to **nothing** — `NTFY_IDENTITY_SOURCE=none`, empty `NTFY_CONFIG`, and every workflow refuses to act (`ntfy_require_config`). There is deliberately **no host-global fallback inside a repo**: falling back means acting as an agent the repo never named, which is an identity hijack by omission. The host-global config is used only outside any repo, in **explicit daemon context** — the shipped systemd/launchd unit templates set `NTFY_DAEMON_CONTEXT=1`; without that marker an outside-repo resolution warns today and will refuse in a future release. This lets one host carry per-repo identities — e.g. one repo sends as `Alice` while a sibling repo posts as its own agent — while durable notification keeps running under the host's own name.
+If a vanilla host's host-global config sets `per_repo_identity_allowed: true`, repo-local identity is unlocked: inside a repo, `<repo>/.claude/ntfy-bus.config.json` **is** the identity, and a repo without one resolves to **nothing** — `NTFY_IDENTITY_SOURCE=none`, empty `NTFY_CONFIG`, and every workflow refuses to act (`ntfy_require_config`). There is deliberately **no host-global fallback inside a repo**: falling back means acting as an agent the repo never named, which is an identity hijack by omission. The host-global config is used only outside any repo, in **explicit daemon context** — the shipped systemd/launchd unit templates set `NTFY_DAEMON_CONTEXT=1`; without that marker an outside-repo resolution refuses (`NTFY_IDENTITY_SOURCE=none`, empty `NTFY_CONFIG`) — the same contract as an unconfigured repo. Host-locked hosts are unaffected: the lock resolves host-global before this branch is reached, so the marker matters only on opt-in hosts. This lets one host carry per-repo identities — e.g. one repo sends as `Alice` while a sibling repo posts as its own agent — while durable notification keeps running under the host's own name.
 
 ### Why locked is the default
 

@@ -70,22 +70,42 @@ assert_eq "unlocked, no repo config: empty config path" "" "$(with_repo 'printf 
 # ...but OUTSIDE any repo, in EXPLICIT daemon context (NTFY_DAEMON_CONTEXT=1,
 # set by the shipped unit templates) host-global is still the answer, silently
 # — else durable notification dies on every opt-in host. WITHOUT the marker
-# this release warns-and-allows (issue #9 migration, phase 1); the flip to
-# refuse re-points these assertions.
+# resolution now REFUSES (issue #9 phase 2 / issue #37): source "none", empty
+# NTFY_CONFIG, and a stderr message that names the marker so a daemon operator
+# knows the one-line unit fix. Note this whole branch is UNREACHABLE on a
+# host-locked host (the lock short-circuits to host-global first — VAL's
+# finding on #37), so the refusal only ever binds opt-in hosts.
 no_repo() { ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
 as_daemon() { ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
 mkdir -p "$ROOT/norepo"
 assert_eq "unlocked, marked daemon, no repo: host-global" "host-global" "$(as_daemon 'printf %s "$NTFY_IDENTITY_SOURCE"')"
 marked_err=$( ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PROJECT_DIR; cd "$ROOT/norepo"; . "$RESOLVER" 2>&1 >/dev/null ) )
-case "$marked_err" in
-  *WARNING*) fail "marked daemon resolves silently (got: '$marked_err')" ;;
-  *) pass "marked daemon resolves silently" ;;
-esac
-assert_eq "unlocked, UNMARKED, no repo: still host-global (phase 1)" "host-global" "$(no_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+# Pin true silence, not just absence of the word WARNING — any stderr on the
+# marked host-global path is a regression (review finding on PR #40).
+if [ -z "$marked_err" ]; then
+  pass "marked daemon resolves silently"
+else
+  fail "marked daemon resolves silently (got: '$marked_err')"
+fi
+assert_eq "unlocked, UNMARKED, no repo: REFUSED (phase 2, issue #37)" "none" "$(no_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+assert_eq "unlocked, UNMARKED, no repo: empty config path" "" "$(no_repo 'printf %s "$NTFY_CONFIG"')"
+# The refusal must not abort set-e callers at source time (the poller sources
+# this resolver from cwd=/ and only THEN cds into NTFY_POLL_REPO to re-resolve
+# — a non-zero auto-resolve here would kill capture on every opt-in host).
+# Probe in a SEPARATE bash process: inside assert_true's `if "$@"` context the
+# harness shell disables errexit for the whole call tree, so an in-harness
+# subshell with `set -e` can never catch this regression (a return-1 refusal
+# would still pass). The child process's own errexit is unaffected.
+sete_source_ok() {
+  ( unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT
+    NTFY_HOME="$ROOT" ROOT="$ROOT" RESOLVER="$RESOLVER" \
+      bash -c 'set -e; cd "$ROOT/norepo"; . "$RESOLVER" >/dev/null 2>&1' )
+}
+assert_true "unmarked refusal still returns 0 (set-e-safe source)" sete_source_ok
 unmarked_err=$( ( export NTFY_HOME="$ROOT"; unset CLAUDE_PROJECT_DIR NTFY_DAEMON_CONTEXT; cd "$ROOT/norepo"; . "$RESOLVER" 2>&1 >/dev/null ) )
 case "$unmarked_err" in
-  *"NTFY_DAEMON_CONTEXT"*) pass "unmarked resolution warns, naming the marker" ;;
-  *) fail "unmarked resolution warns, naming the marker (got: '$unmarked_err')" ;;
+  *"NTFY_DAEMON_CONTEXT"*UNRESOLVED*|*UNRESOLVED*"NTFY_DAEMON_CONTEXT"*) pass "unmarked refusal names the marker and says UNRESOLVED" ;;
+  *) fail "unmarked refusal names the marker and says UNRESOLVED (got: '$unmarked_err')" ;;
 esac
 cleanup
 
@@ -110,8 +130,10 @@ case "$gate_err" in
   *"refusing to act on the bus"*) pass "gate says why, on stderr" ;;
   *) fail "gate says why, on stderr (got: '$gate_err')" ;;
 esac
-# resolved identity (host-global, outside any repo) -> gate passes
-assert_true  "gate passes when resolved" in_env 'ntfy_require_config'
+# resolved identity (host-global, outside any repo, MARKED daemon context —
+# unmarked would now be source "none" per issue #37) -> gate passes
+req_daemon() { ( export NTFY_HOME="$ROOT" NTFY_DAEMON_CONTEXT=1; unset CLAUDE_PROJECT_DIR; cd /; . "$RESOLVER" >/dev/null 2>&1; ntfy_require_config ); }
+assert_true  "gate passes when resolved" req_daemon
 cleanup
 
 finish
