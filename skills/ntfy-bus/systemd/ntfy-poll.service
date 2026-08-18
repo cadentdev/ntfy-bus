@@ -23,8 +23,11 @@ Description=ntfy-bus durable CAPTURE — poll the bus and append new messages to
 
 [Service]
 Type=oneshot
-# NTFY_POLL_REPO selects which repo's identity to poll as; EXPECT_AGENT refuses
-# to run as any other identity (shared-$HOME guard). Edit both for this host.
+# NTFY_POLL_REPO selects which repo's identity to poll as — meaningful only on
+# hosts that opt into per-repo identity; host-locked hosts resolve host-global
+# and ignore it. EXPECT_AGENT refuses to run as any other identity
+# (shared-$HOME guard); compared case-insensitively, so use your agent_id as
+# your config spells it. Edit both for this host.
 Environment=NTFY_POLL_REPO=%h/Repos/CHANGE/ME
 Environment=EXPECT_AGENT=changeme
 ExecStart=%h/.claude/skills/ntfy-bus/daemons/ntfy-poll-to-jsonl.sh

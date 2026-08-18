@@ -88,8 +88,12 @@ ntfy_resolve_config() {
 
   # Vanilla + opt-in: prefer repo-local identity. Find the repo root via the
   # Claude Code project dir, else the surrounding git work tree.
+  # set-e-safe: callers like the poller source this with `set -e` active, and a
+  # bare failing `x=$(git ...)` at the tail of an && list would abort them.
   local repo_root="${CLAUDE_PROJECT_DIR:-}"
-  [ -z "$repo_root" ] && repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+  if [ -z "$repo_root" ]; then
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || repo_root=""
+  fi
 
   local repo_cfg=""
   [ -n "$repo_root" ] && repo_cfg="${repo_root}/.claude/ntfy-bus.config.json"

@@ -34,37 +34,75 @@
 #               */2 * * * * NTFY_POLL_REPO=/path/to/repo EXPECT_AGENT=foo \
 #                            ~/.claude/skills/ntfy-bus/daemons/ntfy-poll-to-jsonl.sh
 #
-# Identity is selected by NTFY_POLL_REPO (which repo's config to poll as);
-# EXPECT_AGENT is an optional guard that refuses to run as any other agent.
+# Identity resolves from config FIRST (lib/resolve-config.sh). NTFY_POLL_REPO
+# selects which repo's identity to poll as — but ONLY on an unlocked host,
+# where the repo-local config IS the identity; on a host-locked host the
+# resolver returns the host-global config before ever reading a repo path.
+# EXPECT_AGENT is an optional guard that refuses to run as any other agent
+# (compared case-insensitively — .agent_id spellings are typically capitalised).
 set -euo pipefail
 
-# Resolve which repo's identity to poll as, most-specific first, so the same
-# script is host-agnostic: schedulers pass NTFY_POLL_REPO; interactive runs fall
-# back to CLAUDE_PROJECT_DIR or the surrounding git work tree.
-# `[ -n ] ||` (not `[ -z ] &&`): the `&&` form returns non-zero when REPO is
-# already set and would abort the whole script under `set -e`.
-REPO="${NTFY_POLL_REPO:-${CLAUDE_PROJECT_DIR:-}}"
-[ -n "$REPO" ] || REPO="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-# Fail loudly rather than guess a host-local default: a wrong guess
-# resolves as the wrong agent and silently captures into the wrong inbox.
-if [ -z "$REPO" ]; then
-  echo "FATAL: cannot resolve which repo's identity to poll as. Set NTFY_POLL_REPO=/path/to/repo (schedulers must pass it explicitly), or run from inside a git work tree whose repo carries an ntfy-bus config." >&2
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
+
+# Libs resolve relative to this file's REAL location — the same symlink-safe
+# bootstrap the wakers use, byte-identical by gate (check.sh section 5). The
+# old $HOME-anchored source path made this script depend on an installed skill
+# even when run from a clone (tests, CI).
+bus_resolve() {
+  local t="$1" d
+  while [ -L "$t" ]; do
+    d=$(cd -P "$(dirname "$t")" && pwd -P); t=$(readlink "$t")
+    case "$t" in /*) ;; *) t="$d/$t" ;; esac
+  done
+  printf '%s/%s' "$(cd -P "$(dirname "$t")" && pwd -P)" "$(basename "$t")"
+}
+LIB_DIR="$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/../lib"
+# shellcheck source=/dev/null
+. "$LIB_DIR/resolve-config.sh"
+
+if [ "${NTFY_HOST_LOCKED:-0}" = "1" ]; then
+  # Host-locked: identity is host-global and a repo path cannot influence it,
+  # so a stale NTFY_POLL_REPO (e.g. after the documented clone rename) must not
+  # abort capture — that turned a dead Environment= line into silent capture
+  # loss (issue #12). Surface the staleness so the operator cleans it up.
+  if [ -n "${NTFY_POLL_REPO:-}" ] && [ ! -d "$NTFY_POLL_REPO" ]; then
+    echo "note: NTFY_POLL_REPO='$NTFY_POLL_REPO' does not exist — ignored (identity is host-global on this host-locked host); remove the stale path from the scheduler unit" >&2
+  fi
+else
+  # Unlocked: the repo genuinely selects identity. Resolve it most-specific
+  # first, so the same script is host-agnostic: schedulers pass NTFY_POLL_REPO;
+  # interactive runs fall back to CLAUDE_PROJECT_DIR or the surrounding git
+  # work tree. `[ -n ] ||` (not `[ -z ] &&`): the `&&` form returns non-zero
+  # when REPO is already set and would abort the whole script under `set -e`.
+  REPO="${NTFY_POLL_REPO:-${CLAUDE_PROJECT_DIR:-}}"
+  [ -n "$REPO" ] || REPO="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  # Fail loudly rather than guess a host-local default: a wrong guess
+  # resolves as the wrong agent and silently captures into the wrong inbox.
+  if [ -z "$REPO" ]; then
+    echo "FATAL: cannot resolve which repo's identity to poll as. Set NTFY_POLL_REPO=/path/to/repo (schedulers must pass it explicitly), or run from inside a git work tree whose repo carries an ntfy-bus config." >&2
+    exit 1
+  fi
+  cd "$REPO" 2>/dev/null || { echo "repo not found: $REPO" >&2; exit 1; }
+  # Pin identity deterministically: resolve-config prefers CLAUDE_PROJECT_DIR
+  # over `git rev-parse`, so this works even under cron's minimal PATH and
+  # guarantees we resolve THIS repo's identity.
+  export CLAUDE_PROJECT_DIR="$REPO"
+  ntfy_resolve_config
+fi
+CONFIG="${NTFY_CONFIG:-}"
+if [ -z "$CONFIG" ] || [ ! -f "$CONFIG" ]; then
+  echo "FATAL: no resolvable ntfy-bus config (identity source: ${NTFY_IDENTITY_SOURCE:-?}) — run the Setup workflow" >&2
   exit 1
 fi
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
-cd "$REPO" 2>/dev/null || { echo "repo not found: $REPO" >&2; exit 1; }
-# Pin identity deterministically: resolve-config prefers CLAUDE_PROJECT_DIR over
-# `git rev-parse`, so this works even under cron's minimal PATH and guarantees we
-# resolve THIS repo's identity (the host-global fallback is a different agent).
-export CLAUDE_PROJECT_DIR="$REPO"
-# shellcheck disable=SC1091
-. "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
-CONFIG="$NTFY_CONFIG"
 AGENT=$(jq -r '.agent_id' "$CONFIG" | tr '[:upper:]' '[:lower:]')
 # Identity guard: if an EXPECT_AGENT is declared, refuse to run as anyone else
 # (defends against a silent resolve-as-wrong-agent on a shared-$HOME host).
-if [ -n "${EXPECT_AGENT:-}" ] && [ "$AGENT" != "$EXPECT_AGENT" ]; then
-  echo "identity guard: resolved '$AGENT' != expected '$EXPECT_AGENT'; refusing" >&2
+# Fold BOTH sides: .agent_id spellings are typically capitalised, and a guard
+# that refuses the correct identity kills capture as silently as a wrong one
+# (issue #5).
+EXPECT=$(printf '%s' "${EXPECT_AGENT:-}" | tr '[:upper:]' '[:lower:]')
+if [ -n "$EXPECT" ] && [ "$AGENT" != "$EXPECT" ]; then
+  echo "identity guard: resolved '$AGENT' != expected '${EXPECT_AGENT}' (compared case-insensitively); refusing" >&2
   exit 1
 fi
 ENDPOINT=$(jq -r '.endpoint' "$CONFIG")
@@ -117,8 +155,12 @@ set -a
 if [ -f "$HOME/.env" ]; then . "$HOME/.env" 2>/dev/null || true; fi
 if [ -f "$HOME/.claude/.env" ]; then . "$HOME/.claude/.env" 2>/dev/null || true; fi
 set +a
-NTFY_USER=$(eval "printf '%s' \"\${$USER_VAR}\"")
-NTFY_PASS=$(eval "printf '%s' \"\${$PASS_VAR}\"")
+# ":-" inside the eval: under `set -u` a credential var that is UNSET (not
+# merely empty) would abort the subshell at the expansion itself, killing the
+# script before the "missing ntfy credentials" log line below could fire —
+# the graceful branch was only reachable for set-but-empty vars.
+NTFY_USER=$(eval "printf '%s' \"\${$USER_VAR:-}\"")
+NTFY_PASS=$(eval "printf '%s' \"\${$PASS_VAR:-}\"")
 if [ -z "$NTFY_USER" ] || [ -z "$NTFY_PASS" ]; then
   log "missing ntfy credentials ($USER_VAR/$PASS_VAR); exit"
   exit 1
