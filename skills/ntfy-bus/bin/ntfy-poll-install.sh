@@ -1,6 +1,6 @@
 #!/bin/bash
-# bin/ntfy-poll-install.sh — render + install + load a per-identity ntfy-poll
-# LaunchAgent on macOS from launchd/ntfy-poll.plist.example.
+# skills/ntfy-bus/bin/ntfy-poll-install.sh — render + install + load a
+# per-identity ntfy-poll LaunchAgent on macOS from launchd/ntfy-poll.plist.example.
 #
 # Each identity needs its own durable capture poller because a host can share
 # one $HOME across agents (two repos, each with its own identity) — see
@@ -54,9 +54,13 @@ bus_resolve() {
   done
   printf '%s/%s' "$(cd -P "$(dirname "$t")" && pwd -P)" "$(basename "$t")"
 }
-REPO=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
+# Anchor to the SKILL dir (this script's parent), never to a repo root: the
+# skill is the unit that ships, and under a plugin install there is no repo
+# above it. Root-bin anchoring was why this installer was reachable only from
+# a clone (issue #22 — same class as #17).
+SKILL_DIR=$(cd -P "$(dirname "$(bus_resolve "${BASH_SOURCE[0]}")")/.." && pwd -P)
 
-TEMPLATE="$REPO/skills/ntfy-bus/launchd/ntfy-poll.plist.example"
+TEMPLATE="$SKILL_DIR/launchd/ntfy-poll.plist.example"
 [ -f "$TEMPLATE" ] || { echo "FATAL: template not found: $TEMPLATE" >&2; exit 1; }
 [ -d "$REPO_ARG" ] || { echo "FATAL: repo not found: $REPO_ARG" >&2; exit 1; }
 

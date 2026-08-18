@@ -76,13 +76,15 @@ The skill arrives namespaced as `ntfy-bus:ntfy-bus`. **Caveat (verified against 
 Nothing is received until something writes the per-agent JSONL inbox that the wakers and CheckInbox read. `daemons/ntfy-poll-to-jsonl.sh` is that writer: a portable poller (bash + `curl`/`jq`) that appends new bus messages every couple of minutes. It is host-agnostic; only the scheduler is OS-specific. `NTFY_POLL_REPO` selects which repo's identity to poll as, and `EXPECT_AGENT` refuses to run as any other identity (shared-`$HOME` guard). Use **one scheduler entry per identity** on a shared-`$HOME` host — the inbox path comes from each identity's config (`.inbox_jsonl`, e.g. `~/.claude/ntfy-inbox.<agent>.jsonl`), never from code.
 
 **macOS (launchd — cron fails silently without Full Disk Access):** use the
-renderer, `bin/ntfy-poll-install.sh`, from a clone of this repo:
+renderer, `skills/ntfy-bus/bin/ntfy-poll-install.sh` — it ships inside the
+skill, so the stable installed path works on every install kind (clone,
+symlink, plugin):
 
 ```bash
-bin/ntfy-poll-install.sh <identity> <repo-path> [label-prefix]
+~/.claude/skills/ntfy-bus/bin/ntfy-poll-install.sh <identity> <repo-path> [label-prefix]
 
 # e.g. an identity whose config lives in this repo, scheduled under net.example:
-bin/ntfy-poll-install.sh gus ~/Repos/cadentdev/ntfy-bus net.example
+~/.claude/skills/ntfy-bus/bin/ntfy-poll-install.sh gus ~/Repos/cadentdev/ntfy-bus net.example
 ```
 
 It renders `launchd/ntfy-poll.plist.example` for one identity, then loads it.
@@ -502,7 +504,7 @@ not be the thing that is missing during the incident.
 | `skills/ntfy-bus/bin/ntfy-waker-status.sh` | Per-identity waker/capture table for this host — who is armed, and how stale each inbox is. Read-only; exit 0 means *it ran*, not *all armed*. | Diagnosing "is the bus actually working for me?". |
 | `bin/check.sh` | Portability/doctrine lint — bash+jq floor, no `${!VAR}` indirection, no hardcoded homes or agent names, and (section 6) no code defaults for state paths. | Before every push, with `tests/run.sh`. |
 | `bin/doctor.sh` | Host drift probe — finds host-local shadow copies of skill files that would silently outrank the canonical clone. | On a host behaving unlike its peers; after any hotfix. |
-| `bin/ntfy-poll-install.sh` | Renders and loads a per-identity durable-capture LaunchAgent (macOS). The guarded path for [Durable capture](#durable-capture-the-receive-path--required-on-every-receiving-host). | Once per identity, at install; again after moving a repo. |
+| `skills/ntfy-bus/bin/ntfy-poll-install.sh` | Renders and loads a per-identity durable-capture LaunchAgent (macOS). The guarded path for [Durable capture](#durable-capture-the-receive-path--required-on-every-receiving-host). | Once per identity, at install; again after moving a repo. |
 
 All are read-only except `ntfy-poll-install.sh`.
 
