@@ -30,8 +30,8 @@
 #                          Outside any repo the host-global config is used ONLY
 #                          in explicit daemon context (NTFY_DAEMON_CONTEXT=1,
 #                          set by the shipped unit templates); without the
-#                          marker this release warns-and-allows, and a future
-#                          release refuses (issue #9 migration).
+#                          marker resolution REFUSES (source "none" — issue #9
+#                          phase 2, decided in issue #37).
 #
 # Default-safe polarity: the secure state (locked) is the default; per-repo
 # identity is an explicit opt-in. A fresh, never-reconfigured host is locked.
@@ -135,17 +135,31 @@ ntfy_resolve_config() {
     # would then silently resolve as the host's agent — the exact substitution
     # PR #7 was written to eliminate (issue #9). Daemon context is therefore
     # EXPLICIT: the shipped unit templates set NTFY_DAEMON_CONTEXT=1, and only
-    # that marker makes the host-global answer silent here.
+    # that marker makes the host-global answer legitimate here. Without it,
+    # this resolves to NOTHING (issue #9 phase 2 / issue #37) — same contract
+    # as the in-repo unconfigured case: unresolved is loud and harmless; wrong
+    # is silent and not.
     #
-    # MIGRATION (issue #9, phase 1 of 2): hosts carry their own installed unit
-    # copies, so a marker-less daemon must not break silently — this release
-    # WARNS and still resolves host-global. A future release flips this branch
-    # to refuse (source "none") without the marker, exactly as the in-repo
-    # unconfigured case already does.
-    NTFY_IDENTITY_SOURCE="host-global"
-    NTFY_CONFIG="$host_global"
-    if [ "${NTFY_DAEMON_CONTEXT:-}" != "1" ]; then
-      echo "ntfy resolve-config: WARNING — resolved the HOST-GLOBAL identity outside any git work tree without NTFY_DAEMON_CONTEXT=1. If this is a daemon, update its installed unit file (the shipped templates now set the marker); if this is an interactive session, cd into the repo whose identity you mean — a future release will refuse to resolve here." >&2
+    # SCOPE (issue #37, decided 2026-08-18): this refusal binds OPT-IN hosts
+    # only, by construction — on a host-locked host ntfy_host_is_locked()
+    # short-circuits to host-global at the top of this function and this
+    # branch is unreachable (VAL verified both directions). Locked hosts need
+    # no marker and no unit edits. Do NOT hoist the marker check above the
+    # lock check: that would break every locked host's daemon at once while
+    # guarding against a substitution that cannot occur where only one
+    # identity exists.
+    #
+    # The refusal must return 0: callers source this file under `set -e`
+    # (the poller does, from cwd=/, before cd-ing into NTFY_POLL_REPO to
+    # re-resolve) — refusing is setting source "none", never aborting the
+    # caller. ntfy_require_config is the acting gate.
+    if [ "${NTFY_DAEMON_CONTEXT:-}" = "1" ]; then
+      NTFY_IDENTITY_SOURCE="host-global"
+      NTFY_CONFIG="$host_global"
+    else
+      NTFY_IDENTITY_SOURCE="none"
+      NTFY_CONFIG=""
+      echo "ntfy resolve-config: outside any git work tree without NTFY_DAEMON_CONTEXT=1 — identity UNRESOLVED (no silent host-global resolution here; issue #9 phase 2). If this is a daemon, add NTFY_DAEMON_CONTEXT=1 to its installed unit file (the shipped templates set it); if this is an interactive session, cd into the repo whose identity you mean." >&2
     fi
   fi
   export NTFY_HOST_LOCKED NTFY_IDENTITY_SOURCE NTFY_CONFIG
