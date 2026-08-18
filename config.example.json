@@ -13,7 +13,7 @@
   "waker": {
     "mode": "auto",
     "systemd_unit": "bus-waker.service",
-    "pidfile": "~/.claude/ntfy-bus.waker.pid",
+    "pidfile": "~/.claude/ntfy-bus.daemon.pid",
     "cmdline_match": "bus-waker-daemon",
     "noise_senders": "gate|uptime|backup|nightly|cron|mirror|ansible|nocodb|bot|kuma",
     "startup_tail": 200,

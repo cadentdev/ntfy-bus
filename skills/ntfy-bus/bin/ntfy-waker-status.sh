@@ -93,9 +93,13 @@ if [ -z "$INBOX" ]; then
 fi
 INBOX=$(ntfy_expand_home "$INBOX")
 STATE_DIR=$(dirname "$INBOX")
-# Byte-identical to the waker's own derivation. If that line changes, this one
-# changes with it — that coupling is the point.
-MY_PIDFILE="${INBOX%.jsonl}.waker.pid"
+# Both pidfiles come from the shared helpers (lib/resolve-config.sh) — the
+# session waker's is derived exactly as the waker derives it, the daemon's is
+# the config fact the daemon claims. Two files because they are two JOBS (the
+# documented healthy pair); a reader that knows only the derived one reports a
+# daemon-managed waker as NOT ARMED while it runs fine (issue #27).
+MY_PIDFILE=$(ntfy_session_pidfile "$INBOX")
+DAEMON_PIDFILE=$(ntfy_daemon_pidfile "$NTFY_CONFIG")
 
 # GNU FIRST, and the caller validates. BSD-first was wrong in a way the `||`
 # cannot catch: GNU `stat -f` is not a format flag, it means FILE SYSTEM status,
@@ -160,20 +164,36 @@ waker_job() {
   esac
 }
 
-# --- Step 1: "is MY waker armed" — a direct answer, not a table to scan ---
+# --- Step 1: "is MY identity watched" — a direct answer, not a table to scan.
+# One line per JOB: the session waker (wake-capable) and the durable daemon
+# (notify-only) are both reported, because either alone reads as "the bus is
+# down" when the other is healthy (issue #27).
 if [ -n "$ME" ]; then
+  echo "This repo's identity ($ME):"
   my_pid=$(cat "$MY_PIDFILE" 2>/dev/null)
   if is_alive "$my_pid" && is_known_waker "$my_pid"; then
-    echo "This repo's identity ($ME): ARMED (pid $my_pid)"
+    echo "  session waker: ARMED (pid $my_pid)"
   elif is_alive "$my_pid"; then
     # Alive but not a script we recognise. Saying NOT ARMED here would hint
     # the reader into arming a SECOND waker next to a live one.
-    echo "This repo's identity ($ME): UNCLEAR — pidfile pid $my_pid is alive but runs an unrecognised command:"
-    echo "  $(ps -p "$my_pid" -o command= 2>/dev/null)"
-    echo "  inspect it before arming anything."
+    echo "  session waker: UNCLEAR — pidfile pid $my_pid is alive but runs an unrecognised command:"
+    echo "    $(ps -p "$my_pid" -o command= 2>/dev/null)"
+    echo "    inspect it before arming anything."
   else
-    echo "This repo's identity ($ME): NOT ARMED"
-    echo "  arm it: bash \"$SKILL_DIR/daemons/ntfy-bus-waker.sh\"   (run in background, from this repo's cwd)"
+    echo "  session waker: NOT ARMED"
+    echo "    arm it: bash \"$SKILL_DIR/daemons/ntfy-bus-waker.sh\"   (run in background, from this repo's cwd)"
+  fi
+  if [ -n "$DAEMON_PIDFILE" ]; then
+    d_pid=$(cat "$DAEMON_PIDFILE" 2>/dev/null)
+    if is_alive "$d_pid" && is_known_waker "$d_pid"; then
+      echo "  durable daemon: RUNNING (pid $d_pid)"
+    elif is_alive "$d_pid"; then
+      echo "  durable daemon: UNCLEAR — pidfile pid $d_pid is alive but runs an unrecognised command"
+    else
+      echo "  durable daemon: not running (pidfile: $DAEMON_PIDFILE)"
+    fi
+  else
+    echo "  durable daemon: no .waker.pidfile configured — daemon state unknown to this tool"
   fi
   echo
 fi
@@ -199,16 +219,32 @@ has_bus_artifact() {
   [ -e "$1.poll-state" ] || [ -e "$1.wake-seen" ] || [ -e "$1.waker.pid" ]
 }
 
-# Evidence lines: key<TAB>kind<TAB>stem. Every stem here is an observed file.
+# Evidence lines: key<TAB>kind<TAB>path. A pid row's path is the PIDFILE
+# itself (not a stem): the daemon's pidfile is a config fact that can sit
+# anywhere and follow no naming scheme, so rows must carry the observed file,
+# not a convention to re-derive it from. An inbox row's path is its stem.
 evidence=$(
-  for f in "$STATE_DIR"/*.waker.pid; do
-    [ -e "$f" ] && printf '%s\t%s\t%s\n' "$(identity_key "${f%.waker.pid}")" pid "${f%.waker.pid}"
-  done
-  for f in "$STATE_DIR"/*.jsonl; do
-    [ -e "$f" ] || continue
-    has_bus_artifact "${f%.jsonl}" || continue
-    printf '%s\t%s\t%s\n' "$(identity_key "${f%.jsonl}")" inbox "${f%.jsonl}"
-  done | sort -u
+  {
+    for f in "$STATE_DIR"/*.waker.pid; do
+      [ -e "$f" ] || continue
+      # The resolved identity's daemon pidfile is reported from config below,
+      # under the resolved inbox's key — skip it here so a daemon pidfile that
+      # happens to match the glob doesn't render twice under two keys.
+      [ "$f" = "$DAEMON_PIDFILE" ] && continue
+      printf '%s\t%s\t%s\n' "$(identity_key "${f%.waker.pid}")" pid "$f"
+    done
+    # The daemon's pidfile is config-declared, not discoverable by glob; the
+    # resolved identity's is known, so report it (issue #27 — a daemon-managed
+    # waker must not be invisible to this table).
+    if [ -n "$DAEMON_PIDFILE" ] && [ -e "$DAEMON_PIDFILE" ]; then
+      printf '%s\t%s\t%s\n' "$(identity_key "${INBOX%.jsonl}")" pid "$DAEMON_PIDFILE"
+    fi
+    for f in "$STATE_DIR"/*.jsonl; do
+      [ -e "$f" ] || continue
+      has_bus_artifact "${f%.jsonl}" || continue
+      printf '%s\t%s\t%s\n' "$(identity_key "${f%.jsonl}")" inbox "${f%.jsonl}"
+    done
+  } | sort -u
 )
 
 if [ -z "$evidence" ]; then
@@ -238,16 +274,16 @@ printf '%s\n' "$evidence" | cut -f1 | sort -u | while IFS= read -r key; do
 
   # One row PER PIDFILE: two live wakers on one identity is a true state
   # the reader must see, not a duplicate to collapse.
-  pid_stems=$(printf '%s\n' "$evidence" \
+  pid_files=$(printf '%s\n' "$evidence" \
     | awk -F'\t' -v k="$key" '$1==k && $2=="pid" {print $3}')
 
-  if [ -z "$pid_stems" ]; then
+  if [ -z "$pid_files" ]; then
     printf '%-22s %-7s %-8s %-20s %-40s %s\n' "$label" "-" "-" "not armed" "-" "$age"
     continue
   fi
 
-  printf '%s\n' "$pid_stems" | while IFS= read -r stem; do
-    pid=$(cat "${stem}.waker.pid" 2>/dev/null)
+  printf '%s\n' "$pid_files" | while IFS= read -r pf; do
+    pid=$(cat "$pf" 2>/dev/null)
     cwd="-"
     # A stale pidfile has no process, so no command, so no job: "-" rather than
     # a guess from the stem, which would be exactly the conventional-path
