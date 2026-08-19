@@ -1,10 +1,17 @@
 {
   "name": "ntfy-bus",
   "displayName": "ntfy bus",
-  "description": "Send and receive messages on a private ntfy bus shared across Claude Code agents — Title-based routing, host-locked identity, optional waker daemon and statusline segment.",
-  "version": "1.0.0",
-  "author": { "name": "cadentdev" },
+  "description": "Send and receive messages on a private ntfy bus shared across Claude Code agents \u2014 Title-based routing, host-locked identity, optional waker daemon and statusline segment.",
+  "version": "0.2.0",
+  "author": {
+    "name": "cadentdev"
+  },
   "repository": "https://github.com/cadentdev/ntfy-bus",
   "license": "MIT",
-  "keywords": ["ntfy", "multi-agent", "messaging", "bus"]
+  "keywords": [
+    "ntfy",
+    "multi-agent",
+    "messaging",
+    "bus"
+  ]
 }

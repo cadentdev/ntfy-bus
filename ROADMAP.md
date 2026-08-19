@@ -109,7 +109,15 @@ security fix and the architecture converge on the same answer.
 Identity is fixed **before** anything is built on top of it. A bridge daemon inherits every
 defect in `lib/resolve-config.sh`, and three have surfaced in two days.
 
-### Phase 1 — close the identity layer (blocking)
+### Phase 1 — close the identity layer (blocking) — ✅ COMPLETE (2026-08-18, v0.2.0)
+
+All three issues closed in the PR #30–#40 wave, and the exit criterion is met:
+the daemon boundary is asserted by test (`tests/resolve-config.sh` L6), not by
+comment. #9 shipped both phases — the explicit `NTFY_DAEMON_CONTEXT=1` marker
+(PR #35) and the refusal of unmarked outside-repo resolution on opt-in hosts
+(#37, PR #40; locked hosts unaffected by construction). #8's gate is enforced
+by `bin/check.sh` §8; #10's stale-model phrases are banned by §9. Phase 2
+(bridge design) is now unblocked. Original scope, for the record:
 
 - **#9** — host-global identity is reachable from any live session outside a git worktree
   (`CLAUDE_PROJECT_DIR` is unset in workflow shells, so resolution falls to `git rev-parse` of
