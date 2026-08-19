@@ -134,5 +134,19 @@ done
 h=$(grep -n 'falling back to host-global' "$REPO/README.md" "$SKILL/SKILL.md" 2>/dev/null)
 [ -n "$h" ] && bad "docs teach the removed host-global fallback (see issue #10): $(printf '%s' "$h" | tr '\n' ' ')"
 
+# 10. one version, three carriers (issue #42): the root VERSION file is the
+# source of truth; the CHANGELOG's top entry and the plugin manifest must
+# match it exactly, so a release can never ship with a stale or split
+# version. Beta: 0.x until the fleet declares the surface stable.
+v=$(cat "$REPO/VERSION" 2>/dev/null | tr -d '[:space:]')
+if [ -z "$v" ]; then
+  bad "VERSION file missing or empty at repo root"
+else
+  cl=$(grep -m1 -Eo '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' "$REPO/CHANGELOG.md" 2>/dev/null | tr -d '#[] ')
+  [ "$cl" = "$v" ] || bad "CHANGELOG.md top entry '$cl' != VERSION '$v' — add the release entry before bumping"
+  pv=$(jq -r '.version // ""' "$REPO/.claude-plugin/plugin.json" 2>/dev/null)
+  [ "$pv" = "$v" ] || bad "plugin.json version '$pv' != VERSION '$v'"
+fi
+
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

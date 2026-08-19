@@ -1,5 +1,7 @@
 # ntfy-bus
 
+**Version:** see [`VERSION`](VERSION) (beta, 0.x — behavior may change between minor versions; every change is recorded in [`CHANGELOG.md`](CHANGELOG.md)).
+
 A Claude Code skill for sending and receiving messages on a private [ntfy](https://ntfy.sh/) bus, shared across agentic harnesses like LifeOS (formerly PAI) and vanilla Claude Code agents.
 
 - Uses **Title-based routing** (`SENDER→RECIPIENT: subject`) for deterministic multi-agent communication. The body is pure payload — never repeats routing info.
@@ -351,7 +353,13 @@ It is worth being precise, because a security property you misunderstand is wors
 
 ### Generating the configs
 
-Run the `Setup` workflow — it detects host class and writes the right shape:
+For a per-repo identity on an opt-in host, the fast path is the onboarding script — it does the mechanical steps below idempotently and prints what still needs a human:
+
+```bash
+bin/onboard.sh <AgentName> /path/to/repo   # from a clone; refuses on locked hosts
+```
+
+Otherwise run the `Setup` workflow — it detects host class and writes the right shape:
 
 - LifeOS hosts: writes ONLY `~/.claude/ntfy-bus.config.json` (host-global). Refuses to write a repo-local config even if asked.
 - Vanilla hosts: prompts host-global-vs-per-repo at Step 0. Per-repo mode writes the **untracked, per-contributor** `<repo>/.claude/ntfy-bus.config.json` and fences it immediately via `.git/info/exclude` (with a tracked `.gitignore` entry as the every-clone follow-up). **Never commit the identity config** — a tracked config ships a live fleet identity to everyone who clones, `bin/check.sh` §7 fails on it, and `bin/doctor.sh` flags it on any host. The BridgeBodyGuard hook is wired once, host-globally, in `~/.claude/settings.json`.
@@ -506,8 +514,9 @@ not be the thing that is missing during the incident.
 | Script | What it does | When you run it |
 |---|---|---|
 | `skills/ntfy-bus/bin/ntfy-waker-status.sh` | Per-identity waker/capture table for this host — who is armed, and how stale each inbox is. Read-only; exit 0 means *it ran*, not *all armed*. | Diagnosing "is the bus actually working for me?". |
-| `bin/check.sh` | Portability/doctrine lint — bash+jq floor, no `${!VAR}` indirection, no hardcoded homes or agent names, and (section 6) no code defaults for state paths. | Before every push, with `tests/run.sh`. |
-| `bin/doctor.sh` | Host drift probe — finds host-local shadow copies of skill files that would silently outrank the canonical clone. | On a host behaving unlike its peers; after any hotfix. |
+| `bin/check.sh` | Portability/doctrine gate — bash+jq floor, no `${!VAR}` indirection, no hardcoded homes or agent names, no code defaults for state paths (§6), no tracked identity config (§7), resolver-source-implies-`ntfy_require_config` pairing in Workflows and README (§8), no stale-model doc phrases (§9), and version consistency across `VERSION`/`CHANGELOG.md`/`plugin.json` (§10). | Before every push, with `tests/run.sh`. |
+| `bin/doctor.sh` | Host drift probe — clone currency vs upstream, config parse + identity resolution, tracked-identity check, and host-local shadow copies that would silently outrank the canonical clone. | On a host behaving unlike its peers; after any hotfix. |
+| `bin/onboard.sh` | Idempotent per-repo onboarding for opt-in hosts: `bin/onboard.sh <AgentName> [repo]` writes the untracked repo config from the host's fleet settings, fences it (worktree-safe) *before* writing, wires the BridgeBodyGuard hook, installs the scheduler unit, and prints the steps that need a human. Refuses on locked hosts, with the reason. | Once per repo identity, instead of hand-running Setup's mechanical steps. |
 | `skills/ntfy-bus/bin/ntfy-poll-install.sh` | Renders and loads a per-identity durable-capture LaunchAgent (macOS). The guarded path for [Durable capture](#durable-capture-the-receive-path--required-on-every-receiving-host). | Once per identity, at install; again after moving a repo. |
 
 All are read-only except `ntfy-poll-install.sh`.
