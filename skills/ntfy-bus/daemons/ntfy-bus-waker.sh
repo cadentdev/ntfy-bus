@@ -5,8 +5,8 @@
 # only NOTIFY (a systemd process cannot re-invoke an idle in-session Claude
 # agent). THIS waker is the piece that actually wakes the model: it is launched
 # by the agent itself as a harness-tracked background task, tails the agent's
-# durable inbox JSONL, and exits(0) on the first NEW message addressed to that
-# agent (or ALL). Exiting is the mechanism that re-invokes the agent in-session
+# durable inbox JSONL, and exits(0) as soon as there is NEW mail addressed to that
+# agent (or ALL) — reporting ALL of it in that one wake. Exiting is the mechanism that re-invokes the agent in-session
 # — a streaming long-poll can SEE traffic but never completes, so it never wakes
 # the model. Pair it with hooks/arm-bus-waker.sh (a SessionStart detector that
 # prompts the agent to (re)arm this via the wake-capable, harness-tracked path).
@@ -27,14 +27,24 @@
 # the next arming would be baselined past, i.e. dropped from the wake path, not
 # delayed. So arms are now backed by an id-keyed seen ledger (lib/dedup.sh, the
 # fleet's one dedup mechanism). First arm suppresses the existing backlog; every
-# later arm scans the whole inbox and wakes on the first ADDRESSED, UNSEEN
-# message — recovering the kill-to-rearm gap. The forward line-scan is kept only
+# later arm scans the recent inbox window and wakes ONCE on EVERY ADDRESSED,
+# UNSEEN message in it — recovering the kill-to-rearm gap. The forward line-scan is kept only
 # as the in-arm fast path (don't re-parse a growing inbox every interval); ids,
 # not line numbers, are the durable across-arm marker, so this also survives the
 # truncation the rotation branch used to handle by discarding everything present.
 # The ledger is wake-private (${inbox}.wake-seen), NOT the durable daemon's
 # .waker.seen_ids: notify-the-phone and wake-the-model must both fire on the same
 # message, so they cannot share one at-most-once ledger (fleet decision, 2026-07-22).
+#
+# Drain, don't single-step (issues #44, #49): a wake retires every addressed,
+# unseen message it can see and says how many — "WAKE: 4 messages (4 backlog,
+# 0 new)" plus the titles. One arm used to retire exactly ONE message, which
+# (a) cost a full agent turn per already-handled backlog message and read as a
+# startup crash loop, and (b) against a live sender let arrivals outpace arms,
+# so whatever was still queued when the agent stopped re-arming stayed SILENT.
+# "backlog" = found by the arm-time gap scan (landed while nothing was armed —
+# may be old, may already be handled; each line carries its date). "new" =
+# landed while this arm was live.
 #
 # Usage:  ntfy-bus-waker.sh [Identity]
 # Launch backgrounded from the agent's repo cwd so identity stays consistent.
@@ -147,7 +157,7 @@ SEEN_CAP="${NTFY_WAKER_SEEN_CAP:-4000}"
 SEEN_KEEP="${NTFY_WAKER_SEEN_KEEP:-3000}"
 mark_seen() { bus_mark_seen "$1" "$SEEN" "$SEEN_CAP" "$SEEN_KEEP"; }
 
-# Emit "id<TAB>title" for every message on stdin that is addressed to us, not
+# Emit "id<TAB>date<TAB>title" for every message on stdin that is addressed to us, not
 # self-sent, and not automation noise. One matcher, used by both the arm-time gap
 # scan and the in-arm loop, so the two can never drift.
 match_scan() {
@@ -156,7 +166,49 @@ match_scan() {
       | select(addressed_to($f))
       | select(msg_sender != $me)
       | select((msg_sender | test($noise)) | not)
-      | "\(.id)\t\(.title)"' 2>/dev/null
+      | "\(.id)\t\(.time | if type == "number" then (todate | .[0:10]) else "undated" end)\t\(.title)"' 2>/dev/null
+}
+
+# A wake lists at most this many titles (the newest); the count always covers
+# everything retired. Bounds the output of a long-unarmed identity's first
+# re-arm, which can be hundreds of messages. Behavior knob, so a default is fine.
+LIST_MAX="${NTFY_WAKER_LIST_MAX:-20}"
+TAB="$(printf '\t')"
+NL='
+'
+# drain_and_wake KIND [PREFIX_LINE]   (KIND = backlog|new; stdin = match_scan)
+# Retire EVERY addressed, unseen message on stdin in one wake. Returns 1 and
+# prints nothing when there is none; otherwise prints the summary + titles,
+# marks them all seen, and returns 0 (the caller exits — that exit is the wake).
+# Print BEFORE marking: a kill between the two re-reports on the next arm
+# (at-least-once) instead of losing mail that was marked but never shown.
+drain_and_wake() {
+  local kind="$1" prefix="${2:-}" id day title n=0 ids="" list="" backlog=0 new=0 noun=messages
+  while IFS="$TAB" read -r id day title; do
+    [ -z "$id" ] && continue
+    bus_seen "$id" "$SEEN" && continue
+    # Same id captured twice inside this scan: count it once.
+    case "$NL$ids" in *"$NL$id$NL"*) continue ;; esac
+    n=$((n+1)); ids="$ids$id$NL"; list="$list  [$day] $title$NL"
+  done
+  [ "$n" -gt 0 ] || return 1
+  if [ "$kind" = backlog ]; then backlog=$n; else new=$n; fi
+  [ "$n" -eq 1 ] && noun=message
+  [ -n "$prefix" ] && echo "$prefix"
+  echo "WAKE: $n $noun ($backlog backlog, $new new)"
+  if [ "$n" -gt "$LIST_MAX" ]; then
+    echo "  ... $((n-LIST_MAX)) older not listed — read the inbox (CheckInbox) for those"
+  fi
+  printf '%s' "$list" | tail -n "$LIST_MAX"
+  if [ "$kind" = backlog ]; then
+    echo "  (backlog = arrived while no waker was armed; check the dates — some may already be handled)"
+  fi
+  while IFS= read -r id; do
+    [ -n "$id" ] && mark_seen "$id"
+  done <<EOF_IDS
+$ids
+EOF_IDS
+  return 0
 }
 
 # --- atomic pidfile claim: don't stack duplicate wakers (issue #29) ---
@@ -214,18 +266,16 @@ if [ ! -f "$SEEN" ]; then
   touch "$SEEN"
   armkind="first"
 else
-  # Re-arm: scan the recent inbox window and wake on the first addressed, unseen
-  # message. This is the fix — it recovers every message that landed in the
-  # reaper-kill gap, which the old EOF baseline stepped past.
-  while IFS="$(printf '\t')" read -r id title; do
-    [ -z "$id" ] && continue
-    if ! bus_seen "$id" "$SEEN"; then
-      mark_seen "$id"
-      echo "armed: identity=$ME inbox=$INBOX filters=$FILTERS re-arm gap-recovered pid=$$"
-      echo "WAKE: $title"
-      exit 0
-    fi
-  done < <(tail -n "$GAP_WINDOW" "$INBOX" | match_scan)
+  # Re-arm: scan the recent inbox window and wake ONCE on every addressed,
+  # unseen message in it. This recovers everything that landed in the
+  # reaper-kill gap (which the old EOF baseline stepped past) — and retires all
+  # of it in this one arm, so a busy session can never accumulate an invisible
+  # queue behind a one-message-per-arm limit (#44, #49).
+  if drain_and_wake backlog \
+       "armed: identity=$ME inbox=$INBOX filters=$FILTERS re-arm gap-recovered pid=$$" \
+       < <(tail -n "$GAP_WINDOW" "$INBOX" | match_scan); then
+    exit 0
+  fi
   armkind="rearm"
 fi
 
@@ -245,16 +295,13 @@ while :; do
     echo "rotation detected (inbox shrank $baseline->$cur) — re-anchoring baseline"
     baseline="$cur"
   elif [ "$cur" -gt "$baseline" ]; then
-    # First NEW line addressed to me, not self-sent, not automation noise, and
-    # not already seen. Mark seen BEFORE exiting so the re-arm that follows a
-    # genuine wake does not re-fire on the same message via its gap scan.
-    while IFS="$(printf '\t')" read -r id title; do
-      [ -z "$id" ] && continue
-      bus_seen "$id" "$SEEN" && continue
-      mark_seen "$id"
-      echo "WAKE: $title"
+    # Every NEW line addressed to me, not self-sent, not automation noise, and
+    # not already seen — all of them in one wake, not just the first. They are
+    # marked seen before the exit so the re-arm that follows a genuine wake does
+    # not re-fire on the same messages via its gap scan.
+    if drain_and_wake new < <(tail -n +"$((baseline+1))" "$INBOX" | match_scan); then
       exit 0
-    done < <(tail -n +"$((baseline+1))" "$INBOX" | match_scan)
+    fi
     baseline="$cur"
   fi
 done

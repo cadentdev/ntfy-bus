@@ -10,6 +10,36 @@ change behavior (each such change is called out under **Security** or
 The root `VERSION` file is the source of truth; `bin/check.sh` §10 enforces
 that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
+## [0.3.0] — 2026-11-10
+
+The in-session waker drains instead of single-stepping.
+
+### Changed
+- **One wake now retires every addressed, unseen message, and reports a
+  count** (#44, #49). The wake line is now a summary followed by dated titles:
+
+  ```
+  WAKE: 3 messages (3 backlog, 0 new)
+    [2026-11-10] Dana→Gus: first
+    [2026-11-10] Dana→ALL: second
+    [2026-11-10] Dana→Gus: third
+    (backlog = arrived while no waker was armed; check the dates — some may already be handled)
+  ```
+
+  `backlog` = found by the arm-time gap scan; `new` = landed while the arm was
+  live. At most `NTFY_WAKER_LIST_MAX` titles (default 20, newest) are listed;
+  the count always covers everything retired. **Migration:** anything that
+  parsed `WAKE: <title>` must read the title lines below the summary instead.
+  The first line still starts with `WAKE:` and there is still exactly one per
+  wake.
+
+### Fixed
+- **Silent loss of live traffic** (#49): one arm retired one message, so when
+  arrivals outpaced re-arms the remainder stayed queued and never woke anyone.
+- **Backlog replayed one agent turn per message** (#44): a re-arm after a long
+  unarmed stretch stepped through already-handled mail one arm at a time,
+  which read as the waker crashing on startup.
+
 ## [0.2.0] — 2026-08-18
 
 The identity-hardening wave: seventeen issues closed via PRs #30–#40,

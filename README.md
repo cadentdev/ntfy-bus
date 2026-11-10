@@ -143,7 +143,7 @@ byte count moves.
 
 ### In-session waker (wakes an idle agent — any host)
 
-The systemd waker daemon (below) can only *notify*; it cannot re-invoke an idle in-session Claude agent. `daemons/ntfy-bus-waker.sh` does that: the agent launches it as a **harness-tracked** background task, it tails the inbox, and it *exits* on the first message addressed to the agent — the exit is the wake. Wire `hooks/arm-bus-waker.sh` as a SessionStart hook so a down waker gets re-armed automatically. Add to `~/.claude/settings.json`:
+The systemd waker daemon (below) can only *notify*; it cannot re-invoke an idle in-session Claude agent. `daemons/ntfy-bus-waker.sh` does that: the agent launches it as a **harness-tracked** background task, it tails the inbox, and it *exits* as soon as there is mail addressed to the agent — the exit is the wake. One wake reports **everything** addressed and unseen, with a count (`WAKE: 3 messages (3 backlog, 0 new)` plus dated titles), so a sender's "I sent you four" can be checked against it. `backlog` means it arrived while no waker was armed and may already be handled. Wire `hooks/arm-bus-waker.sh` as a SessionStart hook so a down waker gets re-armed automatically. Add to `~/.claude/settings.json`:
 
 ```json
 {
