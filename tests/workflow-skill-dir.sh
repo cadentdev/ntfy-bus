@@ -53,7 +53,8 @@ command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 for sh in $SHELLS; do
   for name in SEND CHECK WATCH; do
     eval "code=\$$name"
-    case "$name" in WATCH) probe='; printf %s "$FILTERS" >&3'; want="TestAgent|ALL" ;;
+    # Watch also sources the matcher: the probe proves it loaded.
+    case "$name" in WATCH) probe='; printf %s "$FILTERS${BUS_ROUTING_DEFS:+ +matcher}" >&3'; want="TestAgent|ALL +matcher" ;;
                     *)     probe='; printf %s "$AGENT_ID" >&3'; want="TestAgent" ;; esac
 
     echo "W1 ($sh, $name): stable install path"
@@ -73,11 +74,27 @@ for sh in $SHELLS; do
     case "$out" in *NTFY_SKILL_DIR*) pass "neither place: says what to set" ;; *) fail "neither place: says what to set (got: '$out')" ;; esac
     case "$out" in *CONTINUED*) fail "neither place: snippet stops" ;; *) pass "neither place: snippet stops" ;; esac
     cleanup
+
+    echo "W2b ($sh, $name): a relative or broken path is never followed"
+    new_env; decoy_dir
+    mkdir -p "$ROOT/rel"; cp -R "$ROOT/decoy/lib" "$ROOT/rel/lib"
+    assert_eq "relative NTFY_SKILL_DIR holding a lib: nothing resolved" "" \
+      "$(run_in "$sh" "$code$probe" NTFY_SKILL_DIR="rel")"
+    cleanup
+    for state in dangling file nolib; do
+      new_env; decoy_dir; mkdir -p "$ROOT/.claude/skills"
+      S="$ROOT/.claude/skills/ntfy-bus"
+      case "$state" in dangling) ln -s "$ROOT/gone" "$S" ;; file) : > "$S" ;; nolib) mkdir "$S" ;; esac
+      out=$(run_err "$sh" "$code; echo CONTINUED" NTFY_SKILL_DIR="$ROOT/decoy")
+      case "$out" in *CONTINUED*) fail "stable path is $state: stops, decoy not used" ;; *) pass "stable path is $state: stops, decoy not used" ;; esac
+      cleanup
+    done
   done
 
   echo "W3 ($sh): CheckInbox Step 3a finds the matcher in a fresh shell"
   for shape in stable plugin; do
-    if [ "$shape" = stable ]; then stable_env; set --; else new_env; set -- NTFY_SKILL_DIR="$SKILL_ROOT"; fi
+    # stable: a decoy matcher (matches nothing) sits in NTFY_SKILL_DIR and must lose.
+    if [ "$shape" = stable ]; then stable_env; decoy_dir; set -- NTFY_SKILL_DIR="$ROOT/decoy"; else new_env; set -- NTFY_SKILL_DIR="$SKILL_ROOT"; fi
     emit m1 "Someone→TestAgent: hello"
     emit m2 "Someone→Other: not ours"
     out=$(run_err "$sh" "$CHECK3A" RECIPIENT_FILTERS='["TestAgent","ALL"]' INBOX_JSONL="$INBOX" "$@")

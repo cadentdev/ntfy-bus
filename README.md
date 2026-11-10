@@ -79,8 +79,8 @@ Nothing is received until something writes the per-agent JSONL inbox that the wa
 
 **macOS (launchd — cron fails silently without Full Disk Access):** use the
 renderer, `skills/ntfy-bus/bin/ntfy-poll-install.sh` — it ships inside the
-skill, so the stable installed path works on every install kind (clone,
-symlink, plugin):
+skill, at the stable installed path (clone or symlink install; a plugin-only
+install has no stable path — add a clone + symlink first):
 
 ```bash
 ~/.claude/skills/ntfy-bus/bin/ntfy-poll-install.sh <identity> <repo-path> [label-prefix]

@@ -37,6 +37,8 @@ STEP6=$(block_after '^## Step 6:')
 STEP6B=$(block_n_after '^\*\*6b\. ' 2)
 [ -n "$STEP0" ] && [ -n "$STEP5" ] && [ -n "$STEP6" ] \
   || { echo "setup-doc: could not extract the Step 0/5/6 snippets from $DOC" >&2; exit 1; }
+STEP8=$(block_after '^## Step 8:')
+case "$STEP8" in *doctor.sh*) ;; *) echo "setup-doc: could not extract the Step 8 snippet from $DOC" >&2; exit 1 ;; esac
 case "$STEP6B" in *HOOK_CMD*settings.json*) ;; *) echo "setup-doc: could not extract the Step 6b wiring snippet from $DOC" >&2; exit 1 ;; esac
 
 # Scratch home with the skill installed the way hosts have it: a symlink.
@@ -117,27 +119,51 @@ for sh in $SHELLS; do
   case "$(run_in "$sh" "$STEP6" "$P")" in STOP*) pass "Step 6 LifeOS stopped" ;; *) fail "Step 6 LifeOS stopped" ;; esac
   cleanup
 
+  # A lib that calls every host vanilla: if it is ever sourced, the guards open.
+  decoy() { mkdir -p "$1/lib"; printf '%s\n' 'ntfy_host_class() { printf vanilla; }; ntfy_lifeos_marker() { return 1; }' > "$1/lib/resolve-config.sh"; }
+  # All three guards must refuse; $1 = label, rest = env for run_in.
+  refuses() {
+    local what="$1" out; shift
+    out=$(run_in "$sh" "$STEP0" "$@")
+    case "$out" in *"CANNOT detect host class"*) pass "Step 0 STOP ($what)" ;; *) fail "Step 0 STOP ($what, got: '$out')" ;; esac
+    assert_eq "Step 5 false ($what)" "false" \
+      "$(run_in "$sh" "$STEP5"'; printf %s "$PER_REPO" >&3' PER_REPO=true "$@" 3>&1 >/dev/null)"
+    case "$(run_in "$sh" "$STEP6" "$@")" in STOP*) pass "Step 6 STOP ($what)" ;; *) fail "Step 6 STOP ($what)" ;; esac
+  }
+
   echo "S6 ($sh): a wrong NTFY_SKILL_DIR never yields vanilla"
   new_env
-  for bad in "$ROOT/nowhere" "" "relative/dir"; do
-    out=$(run_in "$sh" "$STEP0" NTFY_SKILL_DIR="$bad")
-    case "$out" in *"CANNOT detect host class"*) pass "Step 0 STOP (NTFY_SKILL_DIR='$bad')" ;; *) fail "Step 0 STOP (NTFY_SKILL_DIR='$bad', got: '$out')" ;; esac
-    assert_eq "Step 5 false (NTFY_SKILL_DIR='$bad')" "false" \
-      "$(run_in "$sh" "$STEP5"'; printf %s "$PER_REPO" >&3' PER_REPO=true NTFY_SKILL_DIR="$bad" 3>&1 >/dev/null)"
-    case "$(run_in "$sh" "$STEP6" NTFY_SKILL_DIR="$bad")" in STOP*) pass "Step 6 STOP (NTFY_SKILL_DIR='$bad')" ;; *) fail "Step 6 STOP (NTFY_SKILL_DIR='$bad')" ;; esac
-  done
+  refuses "nonexistent dir" NTFY_SKILL_DIR="$ROOT/nowhere"
+  refuses "empty" NTFY_SKILL_DIR=""
+  # Relative: resolves against the cwd, i.e. whatever repo the shell is in.
+  # A real decoy lib sits there, so only the absolute-path rule stops it.
+  decoy "$ROOT/relative/dir"
+  refuses "relative dir holding a lib" NTFY_SKILL_DIR="relative/dir"
   cleanup
 
-  echo "S7 ($sh): the stable path wins — NTFY_SKILL_DIR cannot swap the lib under a LifeOS host"
+  echo "S7 ($sh): anything at the stable path wins — NTFY_SKILL_DIR cannot swap the lib"
   doc_env
-  mkdir -p "$ROOT/.claude/LIFEOS" "$ROOT/decoy/lib"
-  printf '%s\n' 'ntfy_host_class() { printf vanilla; }; ntfy_lifeos_marker() { return 1; }' > "$ROOT/decoy/lib/resolve-config.sh"
+  mkdir -p "$ROOT/.claude/LIFEOS"; decoy "$ROOT/decoy"
   D="NTFY_SKILL_DIR=$ROOT/decoy"
-  assert_eq "Step 0 still lifeos" "host class: lifeos (marker: ~/.claude/LIFEOS/)" "$(run_in "$sh" "$STEP0" "$D")"
-  assert_eq "Step 5 still false" "false" \
+  assert_eq "healthy install: Step 0 still lifeos" "host class: lifeos (marker: ~/.claude/LIFEOS/)" "$(run_in "$sh" "$STEP0" "$D")"
+  assert_eq "healthy install: Step 5 still false" "false" \
     "$(run_in "$sh" "$STEP5"'; printf %s "$PER_REPO" >&3' PER_REPO=true "$D" 3>&1 >/dev/null)"
-  case "$(run_in "$sh" "$STEP6" "$D")" in STOP*) pass "Step 6 still stopped" ;; *) fail "Step 6 still stopped" ;; esac
+  case "$(run_in "$sh" "$STEP6" "$D")" in STOP*) pass "healthy install: Step 6 still stopped" ;; *) fail "healthy install: Step 6 still stopped" ;; esac
   cleanup
+  # A BROKEN install must stop, not fall through to the environment (the
+  # #55 review: each of these states unlocked a LifeOS host before the fix).
+  for state in dangling file nolib libfile; do
+    new_env; mkdir -p "$ROOT/.claude/LIFEOS" "$ROOT/.claude/skills"; decoy "$ROOT/decoy"
+    S="$ROOT/.claude/skills/ntfy-bus"
+    case "$state" in
+      dangling) ln -s "$ROOT/gone" "$S" ;;
+      file)     : > "$S" ;;
+      nolib)    mkdir "$S" ;;
+      libfile)  mkdir "$S"; : > "$S/lib" ;;
+    esac
+    refuses "stable path is $state + decoy NTFY_SKILL_DIR" "NTFY_SKILL_DIR=$ROOT/decoy"
+    cleanup
+  done
 
   echo "S8 ($sh): Step 6b never wires a hook path that is not the stable one"
   new_env
@@ -150,6 +176,21 @@ for sh in $SHELLS; do
   run_in "$sh" "$STEP6B" >/dev/null
   assert_eq "stable install: hook wired at the stable path" "1" \
     "$(jq '[.hooks.PreToolUse[].hooks[].command | select(endswith("/.claude/skills/ntfy-bus/hooks/BridgeBodyGuard.hook.ts"))] | length' "$ROOT/.claude/settings.json" 2>/dev/null)"
+  cleanup
+
+  echo "S9 ($sh): Step 8 runs the clone's doctor, and no other"
+  new_env
+  mkdir -p "$ROOT/work/sub" "$ROOT/work/bin" "$ROOT/work/skills/ntfy-bus"
+  echo 'echo WRONG-DOCTOR' > "$ROOT/work/bin/doctor.sh"
+  # Plugin-only: nothing at the stable path. cwd's parent has a bin/doctor.sh.
+  out=$( cd "$ROOT/work/sub" && env HOME="$ROOT" "$sh" -c "$STEP8" 2>&1 )
+  case "$out" in *WRONG-DOCTOR*) fail "plugin-only: ran a doctor found near the cwd" ;; *skipped*) pass "plugin-only: skipped" ;; *) fail "plugin-only: skipped (got: '$out')" ;; esac
+  # Clone behind a RELATIVE symlink, the way real hosts link it.
+  mkdir -p "$ROOT/clone/bin" "$ROOT/clone/skills/ntfy-bus/lib" "$ROOT/.claude/skills"
+  echo 'echo CLONE-DOCTOR' > "$ROOT/clone/bin/doctor.sh"
+  ln -s ../../clone/skills/ntfy-bus "$ROOT/.claude/skills/ntfy-bus"
+  out=$( cd "$ROOT/work/sub" && env HOME="$ROOT" "$sh" -c "$STEP8" 2>&1 )
+  assert_eq "relative symlink: the clone's doctor ran" "CLONE-DOCTOR" "$out"
   cleanup
 done
 

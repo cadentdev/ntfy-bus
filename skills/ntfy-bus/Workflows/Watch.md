@@ -9,10 +9,12 @@ For quick interactive monitoring during a session:
 ```bash
 set -a; . "$HOME/.env" 2>/dev/null; . "$HOME/.claude/.env" 2>/dev/null; set +a
 # Resolve identity via the shared guard (host-locked LifeOS vs vanilla per-repo).
-# Where the skill lives: the stable install path when it exists, else the
-# NTFY_SKILL_DIR you set (plugin install — see SKILL.md).
-if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
-. "${NTFY_SKILL_DIR:?is not set — see Finding the skill directory in SKILL.md}/lib/resolve-config.sh"
+# Where the skill lives: anything at the stable install path wins, else the
+# absolute NTFY_SKILL_DIR you set (plugin install — see SKILL.md).
+NTFY_STABLE="$HOME/.claude/skills/ntfy-bus"
+if [ -e "$NTFY_STABLE" ] || [ -L "$NTFY_STABLE" ]; then NTFY_SKILL_DIR="$NTFY_STABLE"; fi
+case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
+. "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/resolve-config.sh"
 # GATE (issue #8): an unresolved identity refuses here, loudly. If this exits,
 # STOP the workflow — do not source another config or improvise an identity;
 # run the Setup workflow instead.
@@ -51,7 +53,7 @@ If it's not running but should be, refer the user to the watcher script in their
 
 For vanilla Claude Code hosts that want continuous capture, two options:
 
-1. **Cron polling every N minutes** — schedule the foreground command above with output redirected to a local JSONL file. Cron runs from `$HOME`, outside any repo, and on an opt-in host an unmarked outside-repo run **refuses to resolve** (issue #37) — so the cron line must declare which identity it means: set `NTFY_DAEMON_CONTEXT=1` to poll as the host-global identity (daemon context is explicit), or `CLAUDE_PROJECT_DIR=/path/to/repo` to poll as a repo's identity. Example: `*/5 * * * * NTFY_DAEMON_CONTEXT=1 <command>`
+1. **Cron polling every N minutes** — schedule the foreground command above with output redirected to a local JSONL file. (Not on a plugin-only install: a cron line would have to name the plugin cache path, which moves on every plugin update — use a clone + symlink install for anything scheduled.) Cron runs from `$HOME`, outside any repo, and on an opt-in host an unmarked outside-repo run **refuses to resolve** (issue #37) — so the cron line must declare which identity it means: set `NTFY_DAEMON_CONTEXT=1` to poll as the host-global identity (daemon context is explicit), or `CLAUDE_PROJECT_DIR=/path/to/repo` to poll as a repo's identity. Example: `*/5 * * * * NTFY_DAEMON_CONTEXT=1 <command>`
 2. **tmux pane running the foreground command** — simplest, restarts on Ctrl-C; run it from inside the identity's repo so resolution is repo-local
 
 The skill itself doesn't manage the daemon — it just defines the read paths in `CheckInbox`.

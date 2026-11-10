@@ -9,10 +9,12 @@ Resolve the config path through the shared guard, then extract fields:
 ```bash
 # Host-locked (LifeOS) hosts always get the host-global config; vanilla opt-in
 # hosts get the repo-local config when present.
-# Where the skill lives: the stable install path when it exists, else the
-# NTFY_SKILL_DIR you set (plugin install — see SKILL.md).
-if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
-. "${NTFY_SKILL_DIR:?is not set — see Finding the skill directory in SKILL.md}/lib/resolve-config.sh"
+# Where the skill lives: anything at the stable install path wins, else the
+# absolute NTFY_SKILL_DIR you set (plugin install — see SKILL.md).
+NTFY_STABLE="$HOME/.claude/skills/ntfy-bus"
+if [ -e "$NTFY_STABLE" ] || [ -L "$NTFY_STABLE" ]; then NTFY_SKILL_DIR="$NTFY_STABLE"; fi
+case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
+. "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/resolve-config.sh"
 # GATE (issue #8): an unresolved identity refuses here, loudly. If this exits,
 # STOP the workflow — do not source another config or improvise an identity;
 # run the Setup workflow instead.
@@ -55,8 +57,10 @@ for why). Source it, then call `addressed_to($filters)`:
 
 ```bash
 # Same lookup as Step 1 — this snippet may run in a fresh shell.
-if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
-. "${NTFY_SKILL_DIR:?is not set — see Finding the skill directory in SKILL.md}/lib/routing.sh"
+NTFY_STABLE="$HOME/.claude/skills/ntfy-bus"
+if [ -e "$NTFY_STABLE" ] || [ -L "$NTFY_STABLE" ]; then NTFY_SKILL_DIR="$NTFY_STABLE"; fi
+case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
+. "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/routing.sh"
 FILTERS=$(printf '%s' "$RECIPIENT_FILTERS" | jq -r 'join("|")')
 tail -n 200 "$INBOX_JSONL" \
   | jq -c --arg filters "$FILTERS" "$BUS_ROUTING_DEFS"'
