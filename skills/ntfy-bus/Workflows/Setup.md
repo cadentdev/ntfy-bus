@@ -272,7 +272,7 @@ Expect, in order: durable capture within one poll interval (the inbox JSONL
 grows), then the armed session waker prints `WAKE: 1 message (0 backlog, 1 new)`
 with the `Setup→...` title on the line below, and **exits** — exit-on-match is
 the wake mechanism, not a crash. Re-arm it afterwards. (A wake that says
-`backlog` is reporting mail that arrived while nothing was armed; it is one
+`backlog` is reporting mail that was already waiting at arm time; it is one
 wake for the whole backlog, not a crash loop.)
 
 ## Step 8: Finish With a Green Doctor Run

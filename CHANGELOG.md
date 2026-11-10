@@ -23,12 +23,13 @@ The in-session waker drains instead of single-stepping.
     [2026-11-10] Dana→Gus: first
     [2026-11-10] Dana→ALL: second
     [2026-11-10] Dana→Gus: third
-    (backlog = arrived while no waker was armed; check the dates — some may already be handled)
+    (backlog = found waiting at arm time, not live arrivals; check the dates — some may already be handled)
   ```
 
   `backlog` = found by the arm-time gap scan; `new` = landed while the arm was
   live. At most `NTFY_WAKER_LIST_MAX` titles (default 20, newest) are listed;
-  the count always covers everything retired. **Migration:** anything that
+  the count always covers everything retired, and the overflow line names the
+  inbox file and scan window so the unlisted ones can be found. **Migration:** anything that
   parsed `WAKE: <title>` must read the title lines below the summary instead.
   The first line still starts with `WAKE:` and there is still exactly one per
   wake.

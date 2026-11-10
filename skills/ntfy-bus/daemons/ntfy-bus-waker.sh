@@ -157,7 +157,7 @@ SEEN_CAP="${NTFY_WAKER_SEEN_CAP:-4000}"
 SEEN_KEEP="${NTFY_WAKER_SEEN_KEEP:-3000}"
 mark_seen() { bus_mark_seen "$1" "$SEEN" "$SEEN_CAP" "$SEEN_KEEP"; }
 
-# Emit "id<TAB>date<TAB>title" for every message on stdin that is addressed to us, not
+# Emit "id<US>date<US>title" (US = \x1f, the ASCII unit separator) for every message on stdin that is addressed to us, not
 # self-sent, and not automation noise. One matcher, used by both the arm-time gap
 # scan and the in-arm loop, so the two can never drift.
 match_scan() {
@@ -166,14 +166,24 @@ match_scan() {
       | select(addressed_to($f))
       | select(msg_sender != $me)
       | select((msg_sender | test($noise)) | not)
-      | "\(.id)\t\(.time | if type == "number" then (todate | .[0:10]) else "undated" end)\t\(.title)"' 2>/dev/null
+      | "\(.id)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | gsub("[\t\n\r\u001f]"; " "))"' 2>/dev/null
 }
+# Why US and not TAB: tab is IFS-whitespace, so `read` collapses an empty field
+# and shifts the rest left (a date read as an id). US is not whitespace, so
+# fields stay put. Why try/catch on the date: an unconvertible .time (1e18)
+# makes todate raise, and with stderr discarded that message would vanish from
+# the scan — never woken on, never marked. A bad date must not cost the message.
+# Why the gsub: a newline in a title would split one message into two lines.
 
 # A wake lists at most this many titles (the newest); the count always covers
 # everything retired. Bounds the output of a long-unarmed identity's first
 # re-arm, which can be hundreds of messages. Behavior knob, so a default is fine.
 LIST_MAX="${NTFY_WAKER_LIST_MAX:-20}"
-TAB="$(printf '\t')"
+# Anything but a positive integer falls back to the default: 0 or junk would
+# retire the whole backlog while showing no titles at all.
+case "$LIST_MAX" in ''|*[!0-9]*) LIST_MAX=20 ;; esac
+[ "$LIST_MAX" -gt 0 ] || LIST_MAX=20
+SEP="$(printf '\037')"
 NL='
 '
 # drain_and_wake KIND [PREFIX_LINE]   (KIND = backlog|new; stdin = match_scan)
@@ -183,12 +193,13 @@ NL='
 # Print BEFORE marking: a kill between the two re-reports on the next arm
 # (at-least-once) instead of losing mail that was marked but never shown.
 drain_and_wake() {
-  local kind="$1" prefix="${2:-}" id day title n=0 ids="" list="" backlog=0 new=0 noun=messages
-  while IFS="$TAB" read -r id day title; do
+  local kind="$1" prefix="${2:-}" id day title n=0 ids="" list="" oldest="" backlog=0 new=0 noun=messages
+  while IFS="$SEP" read -r id day title; do
     [ -z "$id" ] && continue
     bus_seen "$id" "$SEEN" && continue
     # Same id captured twice inside this scan: count it once.
     case "$NL$ids" in *"$NL$id$NL"*) continue ;; esac
+    [ "$n" -eq 0 ] && oldest="$day"
     n=$((n+1)); ids="$ids$id$NL"; list="$list  [$day] $title$NL"
   done
   [ "$n" -gt 0 ] || return 1
@@ -197,11 +208,14 @@ drain_and_wake() {
   [ -n "$prefix" ] && echo "$prefix"
   echo "WAKE: $n $noun ($backlog backlog, $new new)"
   if [ "$n" -gt "$LIST_MAX" ]; then
-    echo "  ... $((n-LIST_MAX)) older not listed — read the inbox (CheckInbox) for those"
+    # Self-sufficient on purpose: these are retired from the wake path right
+    # here, so the pointer must actually reach them. CheckInbox's default
+    # window is smaller than this scan's, so name the file and the window.
+    echo "  ... $((n-LIST_MAX)) older not listed (oldest: $oldest) — all are within the last $GAP_WINDOW lines of $INBOX"
   fi
   printf '%s' "$list" | tail -n "$LIST_MAX"
   if [ "$kind" = backlog ]; then
-    echo "  (backlog = arrived while no waker was armed; check the dates — some may already be handled)"
+    echo "  (backlog = found waiting at arm time, not live arrivals; check the dates — some may already be handled)"
   fi
   while IFS= read -r id; do
     [ -n "$id" ] && mark_seen "$id"
@@ -260,7 +274,7 @@ if [ ! -f "$SEEN" ]; then
   # First arm: suppress the existing backlog so we don't wake on history. Mark
   # every currently-addressed message in the scan window seen, and materialize
   # the ledger even when nothing matched, so the NEXT arm is treated as a re-arm.
-  while IFS="$(printf '\t')" read -r id _; do
+  while IFS="$SEP" read -r id _; do
     [ -n "$id" ] && mark_seen "$id"
   done < <(tail -n "$GAP_WINDOW" "$INBOX" | match_scan)
   touch "$SEEN"
