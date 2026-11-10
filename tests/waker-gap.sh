@@ -191,7 +191,8 @@ assert_eq "summary counts all five" "WAKE: 5 messages (5 backlog, 0 new)" "$(sum
 assert_contains "newest listed" "$ROOT/o2" 'Dana->TestAgent: msg 5'
 assert_contains "second newest listed" "$ROOT/o2" 'Dana->TestAgent: msg 4'
 assert_false "older ones not listed" grep -q 'msg [123]$' "$ROOT/o2"
-assert_contains "says how many were left off" "$ROOT/o2" '3 older'
+assert_contains "says how many were left off" "$ROOT/o2" '3 older not listed \(oldest: [0-9]{4}-[0-9]{2}-[0-9]{2}\)'
+assert_contains "overflow line names the inbox file" "$ROOT/o2" "within the last [0-9]+ lines of $INBOX"
 for i in 1 2 3 4 5; do assert_true "m$i in ledger" in_ledger "m$i"; done
 arm "$ROOT/o3" 2
 expect "unlisted messages do not re-wake" nowake "$ROOT/o3"
@@ -212,6 +213,48 @@ arm "$ROOT/o1" 2
 printf '{"event":"message","id":"old1","time":1756155600,"title":"Dana->TestAgent: from last year","message":"b"}\n' >> "$INBOX"
 arm "$ROOT/o2" 3
 assert_contains "date shown beside the title" "$ROOT/o2" '\[2025-08-25\] Dana->TestAgent: from last year'
+assert_contains "backlog wakes carry the may-be-handled hint" "$ROOT/o2" 'backlog = found waiting at arm time'
+cleanup
+
+echo "T16: a message with an unconvertible .time is still delivered (review of PR #50)"
+# todate raises on 1e18; with stderr discarded the message used to vanish from
+# the scan — never woken on, never marked. The silent class #49 is about.
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+emit t1 "Dana->TestAgent: before"
+printf '{"event":"message","id":"t2","time":1e18,"title":"Dana->TestAgent: HUGE TIME","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":"t3","title":"Dana->TestAgent: no time at all","message":"b"}\n' >> "$INBOX"
+emit t4 "Dana->TestAgent: after"
+arm "$ROOT/o2" 3
+assert_eq "all four counted" "WAKE: 4 messages (4 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "bad-time message listed as undated" "$ROOT/o2" '\[undated\] Dana->TestAgent: HUGE TIME'
+assert_contains "missing-time message listed as undated" "$ROOT/o2" '\[undated\] Dana->TestAgent: no time at all'
+assert_true "t2 in ledger" in_ledger t2
+cleanup
+
+echo "T17: a bad NTFY_WAKER_LIST_MAX never hides every title (review of PR #50)"
+for bad in 0 abc -2 2.5; do
+  new_env; export NTFY_WAKER_LIST_MAX="$bad"
+  emit id0 "Dana->ALL: backlog"
+  arm "$ROOT/o1" 2
+  for i in 1 2 3; do emit "m$i" "Dana->TestAgent: msg $i"; done
+  arm "$ROOT/o2" 3
+  assert_eq "LIST_MAX='$bad': count right" "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o2")"
+  assert_eq "LIST_MAX='$bad': all three titles shown" "3" "$(grep -c 'Dana->TestAgent: msg [123]$' "$ROOT/o2")"
+  assert_false "LIST_MAX='$bad': no shell error leaks into the wake" grep -Eq 'integer expected|illegal|invalid' "$ROOT/o2"
+  unset NTFY_WAKER_LIST_MAX; cleanup
+done
+
+echo "T18: odd titles and ids keep their fields (review of PR #50)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '{"event":"message","id":"n1","time":1756155600,"title":"Dana->TestAgent: line one\\nline two","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":"n2","time":1756155600,"title":"Dana->TestAgent: has\\ta tab","message":"b"}\n' >> "$INBOX"
+arm "$ROOT/o2" 3
+assert_eq "a two-line title is ONE message" "WAKE: 2 messages (2 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "newline folded to a space" "$ROOT/o2" '\[2025-08-25\] Dana->TestAgent: line one line two'
+assert_false "no junk id from a title fragment in the ledger" in_ledger "line two"
+assert_true "n2 in ledger" in_ledger n2
 cleanup
 
 finish

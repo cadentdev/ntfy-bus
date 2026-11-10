@@ -104,6 +104,7 @@ Launch it exactly that way, from this repo's cwd (it self-resolves identity
 launch is untracked by the harness and cannot deliver a wake. After a wake fires
 (the waker exits when a message arrives), re-arm it the same way. A wake that
 fires within seconds and says 'backlog' is not a crash: it is every message
-that arrived while you were unarmed, reported once. Re-arm once more and it stays up.
+that was waiting when you armed, reported once. Re-arm it; it then stays up
+until the next message arrives.
 EOF
 exit 0
