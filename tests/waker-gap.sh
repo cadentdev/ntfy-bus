@@ -123,4 +123,95 @@ arm "$ROOT/wf" 2                                    # nothing new -> must not fa
 expect "no false wake after a real trim" nowake "$ROOT/wf"
 unset NTFY_WAKER_SEEN_CAP NTFY_WAKER_SEEN_KEEP NTFY_WAKER_GAP_LINES; cleanup
 
+# --- drain, don't single-step (issues #44, #49) ---
+# One arm used to retire exactly ONE addressed-unseen message. Against stale
+# backlog that cost one agent turn per message (#44); against a live sender,
+# arrivals outpaced arms and the remainder stayed queued and silent (#49).
+# These pin the fix: one arm retires EVERYTHING addressed and unseen, wakes
+# once, and says how many.
+LEDGER_REL=".claude/ntfy-inbox.testagent.wake-seen"
+summary() { grep -m1 '^WAKE:' "$1"; }
+in_ledger() { grep -qxF "$1" "$ROOT/$LEDGER_REL"; }
+
+echo "T10: re-arm drains the WHOLE backlog in one wake (#44/#49)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2                                   # first arm: creates ledger
+emit g1 "Dana->TestAgent: gap one"
+emit g2 "Dana->SomeoneElse: not mine"
+emit g3 "Dana->ALL: gap two"
+emit g4 "Dana->TestAgent: gap three"
+arm "$ROOT/o2" 3
+assert_eq "one summary line counts all three" \
+  "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_eq "exactly one WAKE line per arm" "1" "$(grep -c '^WAKE:' "$ROOT/o2")"
+assert_contains "title 1 listed" "$ROOT/o2" 'Dana->TestAgent: gap one'
+assert_contains "title 2 listed" "$ROOT/o2" 'Dana->ALL: gap two'
+assert_contains "title 3 listed" "$ROOT/o2" 'Dana->TestAgent: gap three'
+assert_false "non-addressed message not listed" grep -q 'not mine' "$ROOT/o2"
+assert_true "g1 in ledger" in_ledger g1
+assert_true "g3 in ledger" in_ledger g3
+assert_true "g4 in ledger" in_ledger g4
+arm "$ROOT/o3" 2
+expect "next arm is silent — nothing left queued" nowake "$ROOT/o3"
+assert_contains "next arm stays armed (reached the live loop)" "$ROOT/o3" 'arm=rearm'
+cleanup
+
+echo "T11: a single message still reports a count (singular)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+emit g1 "Dana->TestAgent: the only one"
+arm "$ROOT/o2" 3
+assert_eq "singular summary" "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "its title is listed" "$ROOT/o2" 'Dana->TestAgent: the only one'
+cleanup
+
+echo "T12: in-arm burst — everything that landed in one interval wakes ONCE, as new"
+new_env
+"$WAKER" TestAgent > "$ROOT/o" 2>&1 & P=$!
+sleep 2
+# One write, so both lines land inside the same poll interval deterministically.
+INBOX_REAL="$INBOX"; INBOX="$ROOT/burst"; : > "$INBOX"
+emit b1 "Dana->TestAgent: burst one"; emit b2 "Dana->ALL: burst two"
+INBOX="$INBOX_REAL"; cat "$ROOT/burst" >> "$INBOX"
+sleep 3; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+assert_eq "burst summary" "WAKE: 2 messages (0 backlog, 2 new)" "$(summary "$ROOT/o")"
+assert_contains "burst title 1" "$ROOT/o" 'Dana->TestAgent: burst one'
+assert_contains "burst title 2" "$ROOT/o" 'Dana->ALL: burst two'
+assert_true "b1 in ledger" in_ledger b1
+assert_true "b2 in ledger" in_ledger b2
+cleanup
+
+echo "T13: a long backlog lists only the newest titles, but retires all of it"
+new_env; export NTFY_WAKER_LIST_MAX=2
+emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+for i in 1 2 3 4 5; do emit "m$i" "Dana->TestAgent: msg $i"; done
+arm "$ROOT/o2" 3
+assert_eq "summary counts all five" "WAKE: 5 messages (5 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "newest listed" "$ROOT/o2" 'Dana->TestAgent: msg 5'
+assert_contains "second newest listed" "$ROOT/o2" 'Dana->TestAgent: msg 4'
+assert_false "older ones not listed" grep -q 'msg [123]$' "$ROOT/o2"
+assert_contains "says how many were left off" "$ROOT/o2" '3 older'
+for i in 1 2 3 4 5; do assert_true "m$i in ledger" in_ledger "m$i"; done
+arm "$ROOT/o3" 2
+expect "unlisted messages do not re-wake" nowake "$ROOT/o3"
+unset NTFY_WAKER_LIST_MAX; cleanup
+
+echo "T14: a message captured twice (same id) counts once"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+emit dup "Dana->TestAgent: delivered twice"
+emit dup "Dana->TestAgent: delivered twice"
+arm "$ROOT/o2" 3
+assert_eq "duplicate id counted once" "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o2")"
+cleanup
+
+echo "T15: backlog lines carry the message date, so stale mail is recognisable"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '{"event":"message","id":"old1","time":1756155600,"title":"Dana->TestAgent: from last year","message":"b"}\n' >> "$INBOX"
+arm "$ROOT/o2" 3
+assert_contains "date shown beside the title" "$ROOT/o2" '\[2025-08-25\] Dana->TestAgent: from last year'
+cleanup
+
 finish

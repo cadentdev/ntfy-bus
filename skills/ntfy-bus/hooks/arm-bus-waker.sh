@@ -102,6 +102,8 @@ it via the harness-tracked path so its exit-on-match can re-invoke you:
 Launch it exactly that way, from this repo's cwd (it self-resolves identity
 '${ID}'). Do NOT background it with nohup or '&' or from a subshell — a detached
 launch is untracked by the harness and cannot deliver a wake. After a wake fires
-(the waker exits when a message arrives), re-arm it the same way.
+(the waker exits when a message arrives), re-arm it the same way. A wake that
+fires within seconds and says 'backlog' is not a crash: it is every message
+that arrived while you were unarmed, reported once. Re-arm once more and it stays up.
 EOF
 exit 0
