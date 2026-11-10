@@ -9,12 +9,15 @@ For quick interactive monitoring during a session:
 ```bash
 set -a; . "$HOME/.env" 2>/dev/null; . "$HOME/.claude/.env" 2>/dev/null; set +a
 # Resolve identity via the shared guard (host-locked LifeOS vs vanilla per-repo).
-. "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# Where the skill lives: the stable install path when it exists, else the
+# NTFY_SKILL_DIR you set (plugin install — see SKILL.md).
+if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
+. "${NTFY_SKILL_DIR:?is not set — see Finding the skill directory in SKILL.md}/lib/resolve-config.sh"
 # GATE (issue #8): an unresolved identity refuses here, loudly. If this exits,
 # STOP the workflow — do not source another config or improvise an identity;
 # run the Setup workflow instead.
 ntfy_require_config || exit 1
-. "$HOME/.claude/skills/ntfy-bus/lib/routing.sh"   # shared pointer-agnostic matcher
+. "$NTFY_SKILL_DIR/lib/routing.sh"   # shared pointer-agnostic matcher
 CONFIG="$NTFY_CONFIG"
 ENDPOINT=$(jq -r '.endpoint' "$CONFIG")
 TOPIC=$(jq -r '.topic' "$CONFIG")

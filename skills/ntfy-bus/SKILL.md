@@ -35,7 +35,7 @@ Examples:
 
 ### Pointer character (the arrow)
 
-`→` (U+2192) is the canonical pointer, but it's awkward to type on many keyboards. **Senders may use any of `→`, `➡️`, `👉`, ASCII `->`, or the plain word ` to ` (space-delimited, case-insensitive — `Alice to Bob:`, `Alice TO ALL:`)** — whichever is easiest on their device. All recipient **matchers normalize these to `→` before routing**, so no message is dropped for using a substitute. Programmatic sends (Send/Setup) still **emit the canonical `→`**. The spaces around ` to ` are required (`Aliceto Bob:` does not route; a sender named `Toby` is never split), and one false positive is accepted by design: plain-English headers like `reply to Bob: draft` route to Bob with sender `reply` — the bus is private and the Title convention is the contract, so don't "fix" this. **Don't hand-roll a matcher — source the shared one.** `lib/routing.sh` is the single source of truth: `. "$HOME/.claude/skills/ntfy-bus/lib/routing.sh"` then put `$BUS_ROUTING_DEFS` at the front of your jq program and call `addressed_to($filters)` (pipe-joined recipients, e.g. `"Bob|ALL"`) and/or `msg_sender`. It already (1) scopes to the routing **header** (`split(":")[0]`) so a `->` in the *subject* can't false-match, (2) folds `→ ➡️ ➡ 👉 ->` (VS16 form before bare `➡`), and (3) matches the recipient as a `\b`-token so **group** titles like `Dana→Alice & Bob:` / `Dana→Bob, Alice:` match. Change the matcher there once and every consumer (CheckInbox, Watch, the wakers) inherits it.
+`→` (U+2192) is the canonical pointer, but it's awkward to type on many keyboards. **Senders may use any of `→`, `➡️`, `👉`, ASCII `->`, or the plain word ` to ` (space-delimited, case-insensitive — `Alice to Bob:`, `Alice TO ALL:`)** — whichever is easiest on their device. All recipient **matchers normalize these to `→` before routing**, so no message is dropped for using a substitute. Programmatic sends (Send/Setup) still **emit the canonical `→`**. The spaces around ` to ` are required (`Aliceto Bob:` does not route; a sender named `Toby` is never split), and one false positive is accepted by design: plain-English headers like `reply to Bob: draft` route to Bob with sender `reply` — the bus is private and the Title convention is the contract, so don't "fix" this. **Don't hand-roll a matcher — source the shared one.** `lib/routing.sh` is the single source of truth: `. "$NTFY_SKILL_DIR/lib/routing.sh"` (see [Finding the skill directory](#finding-the-skill-directory)) then put `$BUS_ROUTING_DEFS` at the front of your jq program and call `addressed_to($filters)` (pipe-joined recipients, e.g. `"Bob|ALL"`) and/or `msg_sender`. It already (1) scopes to the routing **header** (`split(":")[0]`) so a `->` in the *subject* can't false-match, (2) folds `→ ➡️ ➡ 👉 ->` (VS16 form before bare `➡`), and (3) matches the recipient as a `\b`-token so **group** titles like `Dana→Alice & Bob:` / `Dana→Bob, Alice:` match. Change the matcher there once and every consumer (CheckInbox, Watch, the wakers) inherits it.
 
 ## Body Size Limit
 
@@ -49,6 +49,36 @@ ntfy rejects bodies over ~4096 bytes with `40014 invalid request: attachments no
 - **Send** — emit a message with proper Title routing
 - **Watch** — long-poll for new traffic in background
 - **Setup** — write `~/.claude/ntfy-bus.config.json` on first use per host
+
+## Finding the skill directory
+
+Every Workflow snippet sources this skill's `lib/` and looks for it in two
+places, in this order:
+
+1. **The stable install path**, `~/.claude/skills/ntfy-bus/` (clone + symlink
+   install). When it exists it always wins and nothing else is consulted.
+2. **`$NTFY_SKILL_DIR`**, only when the stable path is absent — the
+   **plugin-only install**, where the skill lives in a versioned plugin cache
+   whose path changes on every update. Set it to this skill's base directory:
+   the directory holding this `SKILL.md` (Claude Code states it when the skill
+   loads — `Base directory for this skill: ...`). Snippets may run in separate
+   shells, so set it on **each** one:
+
+   ```bash
+   NTFY_SKILL_DIR="/path/the/harness/stated"   # first line of the snippet
+   ```
+
+Use the path the harness stated for **this** session — never one remembered
+from an earlier session (the cache moves), and never one read from a repo's
+files. If neither place has the lib, the snippet stops; that is the correct
+outcome. Do not guess a path and do not skip the resolver: it carries the
+host-identity lock, and Setup must never continue as `vanilla` without it.
+
+What a plugin-only install gets: Setup, Send, CheckInbox (HTTP path), and
+Watch. What it does not: anything wired to outlive the session — the durable
+poller, the waker units, the statusline segment, and the BridgeBodyGuard hook
+all need the stable path (a unit or hook pointed into the plugin cache breaks
+on the next update). Add a clone + symlink install for those.
 
 ## Per-Host Config
 

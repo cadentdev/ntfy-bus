@@ -46,4 +46,20 @@ printf '\n```bash\n%s\n```\n' 'if [ -d "$HOME/.claude/PAI" ]; then HOST_CLASS=pa
 assert_true  "doc code block flagged" flags "a doc code block"
 cleanup
 
+echo "G4: a Workflow snippet sourcing the lib from the fixed install path is caught (section 12)"
+flags12() { case "$(gate)" in *"sources the lib from the fixed install path"*) return 0 ;; *) return 1 ;; esac; }
+copy_repo
+assert_false "clean copy: no finding" flags12
+printf '\n%s\n' 'Prose may say `. "$HOME/.claude/skills/ntfy-bus/lib/routing.sh"` when explaining the old form.' >> "$ROOT/r/skills/ntfy-bus/Workflows/Send.md"
+assert_false "prose not flagged" flags12
+cleanup
+for line in '. "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"' \
+            '  source ~/.claude/skills/ntfy-bus/lib/routing.sh' \
+            '. "${HOME}/.claude/skills/ntfy-bus/lib/routing.sh"'; do
+  copy_repo
+  printf '\n```bash\n%s\n```\n' "$line" >> "$ROOT/r/skills/ntfy-bus/Workflows/Watch.md"
+  assert_true "caught: $line" flags12
+  cleanup
+done
+
 finish

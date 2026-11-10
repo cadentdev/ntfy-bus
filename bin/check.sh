@@ -175,5 +175,20 @@ h=$(for f in "$SKILL"/Workflows/*.md "$SKILL/SKILL.md" "$REPO/README.md"; do
     done | grep -iE -- "$MARKER_RE")
 [ -n "$h" ] && bad "LifeOS marker path spelled out in a doc code block (call ntfy_host_class instead): $(printf '%s' "$h" | tr '\n' ' ')"
 
+# 12. Workflow snippets must not source the skill's lib from the fixed install
+# path (issue #55). That path does not exist on a plugin-only install, where
+# the skill lives in a versioned plugin cache; snippets look in the stable
+# path first and then in NTFY_SKILL_DIR ("Finding the skill directory" in
+# SKILL.md). A new snippet written the old way works on every host its author
+# owns and stops on a plugin-only one. Fenced code blocks of the Workflows
+# only: prose may name the path, and the README's shell snippets are for an
+# operator's own clone + symlink host. Catches the natural form — a `.` or
+# `source` of anything under the fixed path — not a path assembled from parts.
+FIXED_SRC_RE='^[[:space:]]*(\.|source)[[:space:]]+"?(\$HOME|\$\{HOME\}|~)/\.claude/skills/ntfy-bus/'   # gate-literal
+h=$(for f in "$SKILL"/Workflows/*.md; do
+      [ -f "$f" ] && awk -v F="$f" '/^[[:space:]]*```/{inb=!inb; next} inb{print F":"FNR":"$0}' "$f"
+    done | grep -E -- "^[^:]*:[0-9]+:${FIXED_SRC_RE#^}")
+[ -n "$h" ] && bad "Workflow snippet sources the lib from the fixed install path (use the NTFY_SKILL_DIR lookup — see SKILL.md): $(printf '%s' "$h" | tr '\n' ' ')"
+
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

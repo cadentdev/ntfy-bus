@@ -22,25 +22,34 @@ is expected here and silenced; `ntfy_require_config` is deliberately NOT called
 in this step.
 
 ```bash
-NTFY_LIB="$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# Where the skill lives: the stable install path when it exists, else the
+# NTFY_SKILL_DIR you set (plugin install — "Finding the skill directory" in
+# SKILL.md). The stable path wins, so an installed host never consults it.
+NTFY_SKILL_DIR="${NTFY_SKILL_DIR:-}"
+if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
+NTFY_LIB="${NTFY_SKILL_DIR:+$NTFY_SKILL_DIR/lib/resolve-config.sh}"
 if [ -r "$NTFY_LIB" ]; then . "$NTFY_LIB" >/dev/null 2>&1 || true; fi
 HOST_CLASS=$(ntfy_host_class 2>/dev/null) || HOST_CLASS=""
 case "$HOST_CLASS" in
   lifeos)  echo "host class: lifeos (marker: ~/.claude/$(ntfy_lifeos_marker)/)" ;;
   vanilla) echo "host class: vanilla" ;;
-  *)       echo "CANNOT detect host class — skill lib missing or stale at $NTFY_LIB. STOP." ;;
+  *)       echo "CANNOT detect host class — skill lib missing or stale (looked in: ${NTFY_SKILL_DIR:-nowhere — no ~/.claude/skills/ntfy-bus, and NTFY_SKILL_DIR is unset}). STOP." ;;
 esac
 ```
 
 If that prints `CANNOT detect host class` — or prints nothing at all —
-**STOP**: fix the skill install first (the lib must be reachable at
-`~/.claude/skills/ntfy-bus/`, the same path Send, CheckInbox, and Watch use;
-update the clone if it is stale). Never continue as `vanilla` by default —
+**STOP**: fix the lookup first. On a clone + symlink install the lib must be
+reachable at `~/.claude/skills/ntfy-bus/` (update the clone if it is stale).
+On a plugin-only install that path does not exist: set `NTFY_SKILL_DIR` to
+this skill's base directory and run the snippet again — see "Finding the skill
+directory" in `SKILL.md`; Send, CheckInbox, and Watch look in the same two
+places. Never continue as `vanilla` by default —
 that is the unlocked branch, and a host class you could not determine must not
 be the one that offers per-repo identity. Never set `HOST_CLASS` by hand.
 
 Each snippet in this workflow may run in a fresh shell, so `HOST_CLASS` is for
-reading here, not for later steps to trust: Steps 5 and 6 ask the lib again.
+reading here, not for later steps to trust: Steps 5 and 6 ask the lib again
+(and on a plugin-only install each needs `NTFY_SKILL_DIR` set again).
 
 On a **vanilla** host, ask the user:
 
@@ -107,7 +116,10 @@ always**.
 # Only a host positively detected as vanilla may opt in; anything else is false.
 # Asked of the lib HERE, not read from Step 0's variable: this snippet may be
 # running in a fresh shell, where that variable no longer exists.
-NTFY_LIB="$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# Same lookup as Step 0 (stable path, else NTFY_SKILL_DIR).
+NTFY_SKILL_DIR="${NTFY_SKILL_DIR:-}"
+if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
+NTFY_LIB="${NTFY_SKILL_DIR:+$NTFY_SKILL_DIR/lib/resolve-config.sh}"
 if [ -r "$NTFY_LIB" ]; then . "$NTFY_LIB" >/dev/null 2>&1 || true; fi
 if [ "$(ntfy_host_class 2>/dev/null)" = vanilla ]; then PER_REPO="${PER_REPO:-false}"; else PER_REPO=false; fi
 echo "per_repo_identity_allowed will be: $PER_REPO"
@@ -164,7 +176,10 @@ working while nothing can ever send or wake as an agent the repo never named.
 > is at hand.)
 
 ```bash
-NTFY_LIB="$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# Same lookup as Step 0 (stable path, else NTFY_SKILL_DIR).
+NTFY_SKILL_DIR="${NTFY_SKILL_DIR:-}"
+if [ -d "$HOME/.claude/skills/ntfy-bus/lib" ]; then NTFY_SKILL_DIR="$HOME/.claude/skills/ntfy-bus"; fi
+NTFY_LIB="${NTFY_SKILL_DIR:+$NTFY_SKILL_DIR/lib/resolve-config.sh}"
 if [ -r "$NTFY_LIB" ]; then . "$NTFY_LIB" >/dev/null 2>&1 || true; fi
 if [ "$(ntfy_host_class 2>/dev/null)" = vanilla ]; then echo "ok: vanilla host"
 else echo "STOP: not a vanilla host (or host class unknown) — no repo-local identity here"; fi
@@ -249,20 +264,33 @@ If NOT wired, add it host-globally:
 
 ```bash
 BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
-HOOK_CMD="${BUN} ${HOME}/.claude/skills/ntfy-bus/hooks/BridgeBodyGuard.hook.ts"
+HOOK_TS="${HOME}/.claude/skills/ntfy-bus/hooks/BridgeBodyGuard.hook.ts"
+HOOK_CMD="${BUN} ${HOOK_TS}"
 SETTINGS="$HOME/.claude/settings.json"
 
-[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
-tmp=$(mktemp)
-jq --arg cmd "$HOOK_CMD" '
-  .hooks //= {} |
-  .hooks.PreToolUse //= [] |
-  if any(.hooks.PreToolUse[]?; any(.hooks[]?; .command == $cmd))
-  then .
-  else .hooks.PreToolUse += [{"matcher":"Bash","hooks":[{"type":"command","command":$cmd}]}]
-  end
-' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+# The STABLE path only, never NTFY_SKILL_DIR: settings.json outlives this
+# session, and a plugin cache path moves on every plugin update — a hook wired
+# there fails on every Bash call in every session from the next update on.
+if [ ! -f "$HOOK_TS" ]; then
+  echo "NOT wiring: no skill at the stable path ($HOOK_TS)"
+else
+  [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+  tmp=$(mktemp)
+  jq --arg cmd "$HOOK_CMD" '
+    .hooks //= {} |
+    .hooks.PreToolUse //= [] |
+    if any(.hooks.PreToolUse[]?; any(.hooks[]?; .command == $cmd))
+    then .
+    else .hooks.PreToolUse += [{"matcher":"Bash","hooks":[{"type":"command","command":$cmd}]}]
+    end
+  ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+fi
 ```
+
+If that prints `NOT wiring`, this is a plugin-only install: the byte-cap guard
+is not available until the skill is also reachable at
+`~/.claude/skills/ntfy-bus/` (clone + symlink — see the README). Tell the user
+about the gap; do not wire a plugin cache path by hand.
 
 An agent may be blocked from editing hook config in settings files (the
 permission classifier sensibly gates hook self-modification). If the edit is

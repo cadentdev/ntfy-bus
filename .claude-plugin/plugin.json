@@ -2,7 +2,7 @@
   "name": "ntfy-bus",
   "displayName": "ntfy bus",
   "description": "Send and receive messages on a private ntfy bus shared across Claude Code agents \u2014 Title-based routing, host-locked identity, optional waker daemon and statusline segment.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "cadentdev"
   },
