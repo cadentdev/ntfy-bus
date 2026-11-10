@@ -115,15 +115,35 @@ case "$out" in
 esac
 cleanup
 
-echo "D7: LifeOS host carrying the per-repo opt-in flag gets a warning (issue #46)"
+echo "D7: LifeOS host carrying the per-repo opt-in flag is DRIFT (issue #46)"
 new_env
 mkdir -p "$ROOT/.claude/LIFEOS"
 jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \
   && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
 out=$(run_doctor)
 case "$out" in
-  *"warn  "*"per_repo_identity_allowed: true on a LifeOS host"*) pass "inert opt-in flag warned" ;;
-  *) fail "inert opt-in flag warned (got: '$out')" ;;
+  *"DRIFT host-global config sets per_repo_identity_allowed: true on a LifeOS host"*"EXPECT_AGENT"*) pass "inert opt-in flag is DRIFT and names the poller consequence" ;;
+  *) fail "inert opt-in flag is DRIFT and names the poller consequence (got: '$out')" ;;
+esac
+cleanup
+
+# A doctor whose lib predates the host-class functions must say it cannot
+# tell — printing "vanilla" by default would be the silent wrong answer this
+# line exists to end. Run a COPY of bin/ + skills/ with the functions removed.
+echo "D8: stale lib -> doctor says it cannot determine host class (issue #46)"
+new_env
+mkdir -p "$ROOT/clone" "$ROOT/.claude/LIFEOS"
+cp -R "$TESTS_DIR/../bin" "$TESTS_DIR/../skills" "$ROOT/clone/"
+sed -e 's/^ntfy_lifeos_marker()/ntfy_gone_marker()/' -e 's/^ntfy_host_class()/ntfy_gone_class()/' \
+  "$SKILL_ROOT/lib/resolve-config.sh" > "$ROOT/clone/skills/ntfy-bus/lib/resolve-config.sh"
+out=$( ( cd "$ROOT"; HOME="$ROOT" NTFY_HOME="$ROOT" bash "$ROOT/clone/bin/doctor.sh" 2>&1 ) )
+case "$out" in
+  *"DRIFT cannot determine host class"*) pass "stale lib reported, not guessed" ;;
+  *) fail "stale lib reported, not guessed (got: '$out')" ;;
+esac
+case "$out" in
+  *"host class: vanilla"*) fail "never prints vanilla by default (got: '$out')" ;;
+  *) pass "never prints vanilla by default" ;;
 esac
 cleanup
 

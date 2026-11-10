@@ -56,6 +56,24 @@ esac
   || fail "no identity born on a LIFEOS-marked host"
 cleanup
 
+# The refusal must fail CLOSED when the lib is too old to know the marker
+# predicate: run a COPY of bin/ + skills/ with that one function removed.
+echo "O1c: lib without the marker predicate -> onboard refuses, writes nothing (issue #46)"
+onboard_env
+mkdir -p "$ROOT/clone" "$ROOT/.claude/LIFEOS"
+cp -R "$TESTS_DIR/../bin" "$TESTS_DIR/../skills" "$ROOT/clone/"
+sed -e 's/^ntfy_lifeos_marker()/ntfy_gone_marker()/' -e 's/ntfy_lifeos_marker >/false >/' \
+  "$SKILL_ROOT/lib/resolve-config.sh" > "$ROOT/clone/skills/ntfy-bus/lib/resolve-config.sh"
+rc=0; out=$( ( HOME="$ROOT" NTFY_HOME="$ROOT" bash "$ROOT/clone/bin/onboard.sh" NewAgent "$ROOT/repo" 2>&1 ) ) || rc=$?
+assert_eq "incomplete-lib refusal exits 1" "1" "$rc"
+case "$out" in
+  *"incomplete"*) pass "refusal says the lib is incomplete" ;;
+  *) fail "refusal says the lib is incomplete (got: '$out')" ;;
+esac
+[ ! -f "$ROOT/repo/.claude/ntfy-bus.config.json" ] && pass "no identity born through an incomplete lib" \
+  || fail "no identity born through an incomplete lib"
+cleanup
+
 echo "O2: unopted host refuses, pointing at Setup"
 onboard_env
 jq '.per_repo_identity_allowed = false' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \

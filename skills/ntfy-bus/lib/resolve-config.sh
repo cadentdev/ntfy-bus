@@ -62,20 +62,33 @@ ntfy_expand_home() {
 # real LifeOS host classed vanilla with every write-time guard silently off.
 # Either marker counts. When the marker moves again, add the new name HERE and
 # nowhere else: the lock, the lock reason, Setup, onboard.sh, and doctor all
-# ask this function (bin/check.sh section 11 fails an inline probe elsewhere).
-# Prints the marker directory's name and returns 0 on a LifeOS host; prints
-# nothing and returns 1 otherwise.
+# ask this function (bin/check.sh section 11 fails a marker path spelled out
+# anywhere else in shell code or a doc's code block).
+# Prints the marker's name and returns 0 on a LifeOS host; prints nothing and
+# returns 1 otherwise — so never call it bare under `set -e`; use it in an
+# `if`, or ask ntfy_host_class.
+#
+# The test is "anything by that name exists" (-e, or -L for a DANGLING
+# symlink), not -d: this feeds a lock, so it leans locked. A dotfiles-managed
+# home can carry the marker as a symlink whose target is not mounted or not
+# cloned yet; reading that as "vanilla" would unlock a real LifeOS host, while
+# a false lock costs nothing but a per-repo opt-in nobody with a marker has.
 ntfy_lifeos_marker() {
   local m
   for m in LIFEOS PAI; do
-    if [ -d "${_ntfy_home}/.claude/${m}" ]; then printf '%s' "$m"; return 0; fi
+    if [ -e "${_ntfy_home}/.claude/${m}" ] || [ -L "${_ntfy_home}/.claude/${m}" ]; then
+      printf '%s' "$m"; return 0
+    fi
   done
   return 1
 }
 
-# Host class for callers that must branch on it (Setup) or report it (doctor):
-# prints lifeos | vanilla. Always returns 0 — the answer is the output.
+# Host class for callers that must branch on it (Setup): prints
+# lifeos | vanilla and returns 0. With no usable home to look in, the honest
+# answer is "unknown": prints NOTHING and returns 1 — "vanilla" is the class
+# that may opt out of the lock, so it is never the answer by default.
 ntfy_host_class() {
+  if [ -z "$_ntfy_home" ] || [ ! -d "$_ntfy_home" ]; then return 1; fi
   if ntfy_lifeos_marker >/dev/null; then printf 'lifeos'; else printf 'vanilla'; fi
   return 0
 }

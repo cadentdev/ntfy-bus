@@ -22,20 +22,33 @@ LifeOS hosts are recognized again.
   `per_repo_identity_allowed: true` was written the read-time lock was off too
   — a cloned repo carrying a tracked identity config could then send as that
   agent. Either marker now counts, and the marker wins over the opt-in flag.
+  Anything by a marker's name counts — a directory, a file, or a symlink
+  whose target is missing — because a lock should lean locked.
   **Migration:** a LifeOS host that opted into per-repo identity while
-  misclassified becomes host-locked on upgrade — its repo-local identity
-  configs stop being read and every session resolves the host-global identity.
-  `bin/doctor.sh` warns on that state; set `per_repo_identity_allowed` to
-  `false` there.
+  misclassified becomes host-locked on upgrade. What the operator sees:
+  - sessions in those repos resolve, send, and arm wakers as the
+    **host-global** identity; the repo-local identity configs are no longer
+    read;
+  - a per-repo poller with `EXPECT_AGENT` refuses on every run (`identity
+    guard: resolved '<host>' != expected '<repo agent>'`), so that agent's
+    inbox stops growing; one without `EXPECT_AGENT` polls as the host agent;
+  - `bin/doctor.sh` reports DRIFT naming the flag.
+
+  To finish the move: set `per_repo_identity_allowed` to `false`, remove the
+  per-repo poller units, and make sure the host identity has its own poller.
 
 ### Changed
 - One predicate, `ntfy_lifeos_marker` (with `ntfy_host_class`) in
   `lib/resolve-config.sh`, now answers "is this a LifeOS host" for the
   resolver, Setup, `bin/onboard.sh`, and `bin/doctor.sh`. `bin/check.sh` §11
-  fails any inline marker-directory probe elsewhere.
+  fails a marker path spelled out in shared shell code or in a doc's code
+  block (it does not catch a path assembled from parts).
 - `ntfy_lock_reason` prints `lifeos-marker` where it printed `pai-marker`.
-- Setup Step 0 asks the lib for the host class and stops if it cannot tell,
-  instead of defaulting to `vanilla`; `HOST_CLASS` is `lifeos`, not `pai`.
+- Setup asks the lib for the host class in Steps 0, 5, and 6 — each on its
+  own, since snippets may run in separate shells — and stops when it cannot
+  tell, instead of defaulting to `vanilla`. Setup now needs the skill
+  reachable at `~/.claude/skills/ntfy-bus/`, as Send, CheckInbox, and Watch
+  already did.
 - `bin/doctor.sh` prints the detected host class and the marker (or lock
   state) that produced it.
 

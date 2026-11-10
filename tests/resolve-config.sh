@@ -75,9 +75,40 @@ new_env
 assert_false "no marker: predicate is false" in_env 'ntfy_lifeos_marker'
 assert_eq    "no marker: prints nothing" ""        "$(in_env 'ntfy_lifeos_marker')"
 assert_eq    "no marker: host class"     "vanilla" "$(in_env 'ntfy_host_class')"
-# A plain FILE of the marker's name is not a LifeOS install.
-: > "$ROOT/.claude/LIFEOS"
-assert_eq    "marker name as a plain file: still vanilla" "vanilla" "$(in_env 'ntfy_host_class')"
+cleanup
+
+# The predicate feeds a lock, so it leans LOCKED: anything by the marker's
+# name counts. The dangling symlink is the realistic one — a dotfiles-managed
+# home whose link target is not mounted or not cloned yet (review of #46).
+echo "L4d: odd marker shapes all LOCK, even with opt-in (fail-closed)"
+for shape in file dangling linkdir; do
+  new_env
+  jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \
+    && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
+  case "$shape" in
+    file)     : > "$ROOT/.claude/LIFEOS" ;;
+    dangling) ln -s "$ROOT/nowhere" "$ROOT/.claude/LIFEOS" ;;
+    linkdir)  mkdir -p "$ROOT/real"; ln -s "$ROOT/real" "$ROOT/.claude/PAI" ;;
+  esac
+  assert_true "marker as $shape: locked"     in_env 'ntfy_host_is_locked'
+  assert_eq   "marker as $shape: host class" "lifeos" "$(in_env 'ntfy_host_class')"
+  cleanup
+done
+
+echo "L4e: no usable home -> host class is UNKNOWN (empty, non-zero), never vanilla"
+new_env
+no_home() { ( export NTFY_HOME="$ROOT/does-not-exist"; unset CLAUDE_PROJECT_DIR; cd /; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
+assert_false "missing home: non-zero"       no_home 'ntfy_host_class'
+assert_eq    "missing home: prints nothing" "" "$(no_home 'ntfy_host_class')"
+assert_true  "missing home: still locked"   no_home 'ntfy_host_is_locked'
+# The lib is sourced under `set -e` by real callers; the new functions must
+# not abort one. Separate process — errexit is inert inside assert's `if`.
+sete_marker_ok() {
+  ( unset CLAUDE_PROJECT_DIR
+    NTFY_HOME="$ROOT" RESOLVER="$RESOLVER" bash -c \
+      'set -eu; cd /; . "$RESOLVER" >/dev/null 2>&1; ntfy_host_is_locked; c=$(ntfy_host_class); r=$(ntfy_lock_reason); [ "$c" = vanilla ]' )
+}
+assert_true  "vanilla host: lib calls survive set -eu" sete_marker_ok
 cleanup
 
 echo "L5: explicit opt-in on a vanilla host UNLOCKS"

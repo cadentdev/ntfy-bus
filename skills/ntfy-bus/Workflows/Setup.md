@@ -22,19 +22,25 @@ is expected here and silenced; `ntfy_require_config` is deliberately NOT called
 in this step.
 
 ```bash
-. "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh" >/dev/null 2>&1
+NTFY_LIB="$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+if [ -r "$NTFY_LIB" ]; then . "$NTFY_LIB" >/dev/null 2>&1 || true; fi
 HOST_CLASS=$(ntfy_host_class 2>/dev/null) || HOST_CLASS=""
 case "$HOST_CLASS" in
   lifeos)  echo "host class: lifeos (marker: ~/.claude/$(ntfy_lifeos_marker)/)" ;;
   vanilla) echo "host class: vanilla" ;;
-  *)       echo "CANNOT detect host class — the skill lib did not load. STOP." >&2 ;;
+  *)       echo "CANNOT detect host class — skill lib missing or stale at $NTFY_LIB. STOP." ;;
 esac
 ```
 
-If that prints `CANNOT detect host class`, **STOP**: fix the skill install
-first. Never continue as `vanilla` by default — that is the unlocked branch,
-and a host class you could not determine must not be the one that offers
-per-repo identity.
+If that prints `CANNOT detect host class` — or prints nothing at all —
+**STOP**: fix the skill install first (the lib must be reachable at
+`~/.claude/skills/ntfy-bus/`, the same path Send, CheckInbox, and Watch use;
+update the clone if it is stale). Never continue as `vanilla` by default —
+that is the unlocked branch, and a host class you could not determine must not
+be the one that offers per-repo identity. Never set `HOST_CLASS` by hand.
+
+Each snippet in this workflow may run in a fresh shell, so `HOST_CLASS` is for
+reading here, not for later steps to trust: Steps 5 and 6 ask the lib again.
 
 On a **vanilla** host, ask the user:
 
@@ -99,7 +105,12 @@ always**.
 
 ```bash
 # Only a host positively detected as vanilla may opt in; anything else is false.
-if [ "$HOST_CLASS" = vanilla ]; then PER_REPO="${PER_REPO:-false}"; else PER_REPO=false; fi
+# Asked of the lib HERE, not read from Step 0's variable: this snippet may be
+# running in a fresh shell, where that variable no longer exists.
+NTFY_LIB="$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+if [ -r "$NTFY_LIB" ]; then . "$NTFY_LIB" >/dev/null 2>&1 || true; fi
+if [ "$(ntfy_host_class 2>/dev/null)" = vanilla ]; then PER_REPO="${PER_REPO:-false}"; else PER_REPO=false; fi
+echo "per_repo_identity_allowed will be: $PER_REPO"
 
 cat > "$HOME/.claude/ntfy-bus.config.json" <<EOF
 {
@@ -144,11 +155,20 @@ working while nothing can ever send or wake as an agent the repo never named.
 
 ## Step 6: (Vanilla, per-repo only) Write the Repo-Local Identity + Wiring
 
-> **LifeOS guard:** if `$HOST_CLASS` is anything other than `vanilla`
-> (`lifeos`, or empty because detection failed), STOP here. Do **not** write a
+> **LifeOS guard:** run the check below first. If it does not print
+> `ok: vanilla host`, STOP here. Do **not** write a
 > repo-local identity config — an identity-bearing tracked config must not even
 > be born on a LifeOS host. The read-time guard in `resolve-config.sh` would ignore
-> it anyway; this is the belt-and-suspenders write-time half.
+> it anyway; this is the belt-and-suspenders write-time half. (`bin/onboard.sh`
+> does this whole step, refusal included, mechanically — prefer it when a clone
+> is at hand.)
+
+```bash
+NTFY_LIB="$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+if [ -r "$NTFY_LIB" ]; then . "$NTFY_LIB" >/dev/null 2>&1 || true; fi
+if [ "$(ntfy_host_class 2>/dev/null)" = vanilla ]; then echo "ok: vanilla host"
+else echo "STOP: not a vanilla host (or host class unknown) — no repo-local identity here"; fi
+```
 
 **6a. Untracked identity config** (per-contributor — never committed):
 
