@@ -122,6 +122,14 @@ t=$(git -C "$REPO" ls-files -- '.claude/ntfy-bus.config.json' '*/.claude/ntfy-bu
 # advertises cron and daemons — the exact contexts issue #37 changed), so the
 # pairing gate covers it alongside the Workflows.
 for f in "$SKILL"/Workflows/*.md "$REPO/README.md"; do
+  # Setup is the one Workflow that runs BEFORE an identity exists: it sources
+  # the resolver only to ask the host class (issue #46), and requiring a
+  # resolved config there would make first-time setup impossible. Exempted by
+  # name, out loud — not by its prose happening to contain the gate's name.
+  # Cost, stated: a future Setup step that sources the resolver AND acts on
+  # the bus is not caught here. Setup's bus actions today (Steps 7/7b) are
+  # raw curl on values the operator just typed, and never went through it.
+  [ "$(basename "$f")" = "Setup.md" ] && continue
   grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*resolve-config\.sh' "$f" || continue
   grep -q 'ntfy_require_config' "$f" || bad "doc sources resolver without ntfy_require_config: $f"
 done
@@ -147,6 +155,25 @@ else
   pv=$(jq -r '.version // ""' "$REPO/.claude-plugin/plugin.json" 2>/dev/null)
   [ "$pv" = "$v" ] || bad "plugin.json version '$pv' != VERSION '$v'"
 fi
+
+# 11. LifeOS host detection has ONE home (issue #46): ntfy_lifeos_marker in
+# lib/resolve-config.sh. The marker directory was renamed once (PAI ->
+# LIFEOS) while three inline `[ -d ~/.claude/PAI ]` probes each kept the old
+# name, which classed real LifeOS hosts as vanilla and switched off every
+# write-time guard keyed on that class. So: the marker's PATH may not be
+# spelled out (any case) on a code line of shared shell — hooks/ included —
+# nor inside a fenced code block of the docs. The lib builds the path from a
+# name list and so never matches; doc PROSE may name the marker freely.
+# What this catches is the natural copy-paste form. It does NOT catch a path
+# assembled from parts (DIR=~/.claude; [ -d "$DIR/PAI" ]) — review still has
+# to; tests/check-gate.sh pins what it does catch.
+MARKER_RE='\.claude/(PAI|LIFEOS)'                                               # gate-literal
+h=$(grep -iEn -- "^[^#]*$MARKER_RE" $SHARED "$SKILL"/hooks/*.sh /dev/null 2>/dev/null | grep -v 'gate-literal')
+[ -n "$h" ] && bad "LifeOS marker path spelled out in shell code (call ntfy_lifeos_marker / ntfy_host_class instead): $(printf '%s' "$h" | tr '\n' ' ')"
+h=$(for f in "$SKILL"/Workflows/*.md "$SKILL/SKILL.md" "$REPO/README.md"; do
+      [ -f "$f" ] && awk -v F="$f" '/^[[:space:]]*```/{inb=!inb; next} inb{print F":"FNR":"$0}' "$f"
+    done | grep -iE -- "$MARKER_RE")
+[ -n "$h" ] && bad "LifeOS marker path spelled out in a doc code block (call ntfy_host_class instead): $(printf '%s' "$h" | tr '\n' ' ')"
 
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

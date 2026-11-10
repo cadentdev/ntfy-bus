@@ -63,6 +63,7 @@ SKILL="$REPO/skills/ntfy-bus"
 . "$SKILL/lib/resolve-config.sh" >/dev/null 2>&1 \
   || fatal "cannot source $SKILL/lib/resolve-config.sh — run onboard.sh from a full clone (bin/ and skills/ side by side)"
 type ntfy_host_is_locked >/dev/null 2>&1 && type ntfy_lock_reason >/dev/null 2>&1 \
+  && type ntfy_lifeos_marker >/dev/null 2>&1 \
   || fatal "resolver lib loaded but incomplete ($SKILL/lib/resolve-config.sh) — the clone is stale or corrupted"
 # shellcheck source=skills/ntfy-bus/lib/capabilities.sh
 . "$SKILL/lib/capabilities.sh" >/dev/null 2>&1 \
@@ -81,8 +82,8 @@ human() { HUMAN_STEPS="${HUMAN_STEPS}  - $*
 # The reason comes from the lib (single source of truth for the marker's name
 # and the opt-in rule) — never re-probed inline here.
 case "$(ntfy_lock_reason)" in
-  pai-marker)
-    fatal "this host is host-locked (LifeOS marker present) — a repo-local identity must not even be born here. The read-time guard would ignore it; this is the write-time half." ;;
+  lifeos-marker)
+    fatal "this host is host-locked (LifeOS marker ~/.claude/$(ntfy_lifeos_marker)/ present) — a repo-local identity must not even be born here. The read-time guard would ignore it; this is the write-time half." ;;
   no-config)
     fatal "no host-global config at $HG_CONFIG — run the Setup workflow first; it writes the fleet settings (endpoint, credentials) interactively, which this script deliberately never invents." ;;
   no-optin)

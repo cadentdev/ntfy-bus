@@ -331,7 +331,7 @@ All four workflows resolve the identity config through one shared guard (`lib/re
 
 ### Host-locked (LifeOS hosts, and unconfigured vanilla hosts)
 
-If `~/.claude/PAI/` exists (the LifeOS marker directory — its on-disk name predates the rebrand) OR the host-global config does NOT set `per_repo_identity_allowed: true`, the host is **locked**: every workflow reads `~/.claude/ntfy-bus.config.json` and any repo-local identity config is ignored. There is one identity per host, and it cannot be overridden by a cloned repo. This is the default-safe polarity — a fresh host you never reconfigured is locked.
+If a LifeOS marker directory exists (`~/.claude/LIFEOS/` on current LifeOS, or the legacy `~/.claude/PAI/` from before the rebrand — either one counts) OR the host-global config does NOT set `per_repo_identity_allowed: true`, the host is **locked**: every workflow reads `~/.claude/ntfy-bus.config.json` and any repo-local identity config is ignored. There is one identity per host, and it cannot be overridden by a cloned repo. This is the default-safe polarity — a fresh host you never reconfigured is locked.
 
 ### Vanilla opt-in (per-repo identity)
 
@@ -339,7 +339,7 @@ If a vanilla host's host-global config sets `per_repo_identity_allowed: true`, r
 
 ### Why locked is the default
 
-Without this guard, a LifeOS host that cloned an identity-bearing repo (one tracking `agent_id=Alice`) and ran Claude Code there would silently send bus messages as Alice — the resolver would pick up the repo-local config and the SENDER half of every Title would be wrong. The lock is enforced at two layers: the resolver IGNORES repo-local identity on locked hosts (read-time guard), and the Setup workflow REFUSES to write a repo-local identity config when `$HOME/.claude/PAI/` exists (write-time guard). Belt and suspenders.
+Without this guard, a LifeOS host that cloned an identity-bearing repo (one tracking `agent_id=Alice`) and ran Claude Code there would silently send bus messages as Alice — the resolver would pick up the repo-local config and the SENDER half of every Title would be wrong. The lock is enforced at two layers: the resolver IGNORES repo-local identity on locked hosts (read-time guard), and the Setup workflow REFUSES to write a repo-local identity config on a LifeOS host (write-time guard). Belt and suspenders. All of them — the resolver, Setup, `bin/onboard.sh`, and `bin/doctor.sh` — get the answer to "is this a LifeOS host" from one place, `ntfy_lifeos_marker` in `lib/resolve-config.sh` (Setup through its wrapper `ntfy_host_class`); anything at all by a marker's name counts, including a symlink whose target is missing, because a lock should lean locked; `bin/doctor.sh` prints the detected host class and the marker that produced it, so a misclassified host is visible rather than silent.
 
 ### What the lock does and does not do
 
