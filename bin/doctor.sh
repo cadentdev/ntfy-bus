@@ -57,6 +57,28 @@ else
   bad "config missing/unparseable at ${NTFY_CONFIG:-unresolved} — run the Setup workflow"
 fi
 
+# 3b. host class, and what produced it (issue #46). The classification decides
+# whether the identity lock can ever be lifted, and it used to be silent — a
+# wrong answer looked identical to a right one. Asked of the lib, never probed
+# inline here. A missing function means a stale/broken lib: say so, because
+# "vanilla" printed by default would be the exact silent wrong answer.
+if type ntfy_host_class >/dev/null 2>&1 && type ntfy_lifeos_marker >/dev/null 2>&1 \
+   && type ntfy_lock_reason >/dev/null 2>&1; then
+  if marker=$(ntfy_lifeos_marker); then
+    ok "host class: lifeos (marker: ~/.claude/$marker/) — host-locked, always"
+    # The marker wins, so this flag is inert — but it means the host opted
+    # into per-repo identity while it was misclassified, and any repo-local
+    # identities it grew are now (correctly) ignored.
+    if [ "$(jq -r '.per_repo_identity_allowed // false' "${NTFY_HOME:-$HOME}/.claude/ntfy-bus.config.json" 2>/dev/null)" = "true" ]; then
+      note "host-global config sets per_repo_identity_allowed: true on a LifeOS host — IGNORED (the marker wins). Set it to false; any repo-local identity configs on this host are no longer read."
+    fi
+  else
+    ok "host class: vanilla (no LifeOS marker directory in ~/.claude/) — lock state: $(ntfy_lock_reason)"
+  fi
+else
+  bad "cannot determine host class — resolver lib missing or stale at $REPO/skills/ntfy-bus/lib/resolve-config.sh"
+fi
+
 # 4. shadow scan: known bus-component basenames living outside repo-owned homes.
 # Allowlist of legitimately host-local files; everything else matching is drift.
 # ~/.local/bin is scanned WITH -L: both symlinked ENTRIES (a stow-managed shadow

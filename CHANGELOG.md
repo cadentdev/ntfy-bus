@@ -10,6 +10,35 @@ change behavior (each such change is called out under **Security** or
 The root `VERSION` file is the source of truth; `bin/check.sh` §10 enforces
 that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
+## [0.3.1] — 2026-11-10
+
+LifeOS hosts are recognized again.
+
+### Security
+- **Host-class detection accepts the current LifeOS marker** (#46). Detection
+  looked only for `~/.claude/PAI/`, which current LifeOS no longer creates (it
+  creates `~/.claude/LIFEOS/`). Such a host was classed `vanilla`: Setup offered
+  it per-repo identity, `bin/onboard.sh` skipped its LifeOS refusal, and once
+  `per_repo_identity_allowed: true` was written the read-time lock was off too
+  — a cloned repo carrying a tracked identity config could then send as that
+  agent. Either marker now counts, and the marker wins over the opt-in flag.
+  **Migration:** a LifeOS host that opted into per-repo identity while
+  misclassified becomes host-locked on upgrade — its repo-local identity
+  configs stop being read and every session resolves the host-global identity.
+  `bin/doctor.sh` warns on that state; set `per_repo_identity_allowed` to
+  `false` there.
+
+### Changed
+- One predicate, `ntfy_lifeos_marker` (with `ntfy_host_class`) in
+  `lib/resolve-config.sh`, now answers "is this a LifeOS host" for the
+  resolver, Setup, `bin/onboard.sh`, and `bin/doctor.sh`. `bin/check.sh` §11
+  fails any inline marker-directory probe elsewhere.
+- `ntfy_lock_reason` prints `lifeos-marker` where it printed `pai-marker`.
+- Setup Step 0 asks the lib for the host class and stops if it cannot tell,
+  instead of defaulting to `vanilla`; `HOST_CLASS` is `lifeos`, not `pai`.
+- `bin/doctor.sh` prints the detected host class and the marker (or lock
+  state) that produced it.
+
 ## [0.3.0] — 2026-11-10
 
 The in-session waker drains instead of single-stepping.

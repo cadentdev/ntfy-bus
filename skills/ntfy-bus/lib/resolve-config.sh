@@ -12,7 +12,9 @@
 # Identity resolution + host-lock guard
 # (ratified on the bus 2026-06-13):
 #
-#   HOST-LOCKED (LifeOS):  ~/.claude/PAI/ exists, OR the host-global config does
+#   HOST-LOCKED (LifeOS):  a LifeOS marker directory exists (~/.claude/LIFEOS/,
+#                       or the legacy ~/.claude/PAI/ — see ntfy_lifeos_marker),
+#                       OR the host-global config does
 #                       NOT set  per_repo_identity_allowed: true.
 #                       -> ALWAYS the host-global config. Any repo-local
 #                          identity config is IGNORED. This read-time guard
@@ -20,7 +22,7 @@
 #                          hijack that would otherwise happen the first time a
 #                          LifeOS host clones + runs an identity-bearing repo.
 #
-#   VANILLA opt-in:     no ~/.claude/PAI/  AND the host-global config sets
+#   VANILLA opt-in:     no LifeOS marker  AND the host-global config sets
 #                       per_repo_identity_allowed: true.
 #                       -> the repo-local .claude/ntfy-bus.config.json IS the
 #                          identity. A repo without one resolves to NOTHING
@@ -53,11 +55,35 @@ ntfy_expand_home() {
   esac
 }
 
+# Is this a LifeOS host? THE one place that knows the marker directories'
+# names (issue #46). LifeOS has renamed its marker once already — PAI was the
+# former brand; current releases create LIFEOS and no longer create PAI — and
+# when detection lived in several inline `[ -d ... ]` tests, the rename left a
+# real LifeOS host classed vanilla with every write-time guard silently off.
+# Either marker counts. When the marker moves again, add the new name HERE and
+# nowhere else: the lock, the lock reason, Setup, onboard.sh, and doctor all
+# ask this function (bin/check.sh section 11 fails an inline probe elsewhere).
+# Prints the marker directory's name and returns 0 on a LifeOS host; prints
+# nothing and returns 1 otherwise.
+ntfy_lifeos_marker() {
+  local m
+  for m in LIFEOS PAI; do
+    if [ -d "${_ntfy_home}/.claude/${m}" ]; then printf '%s' "$m"; return 0; fi
+  done
+  return 1
+}
+
+# Host class for callers that must branch on it (Setup) or report it (doctor):
+# prints lifeos | vanilla. Always returns 0 — the answer is the output.
+ntfy_host_class() {
+  if ntfy_lifeos_marker >/dev/null; then printf 'lifeos'; else printf 'vanilla'; fi
+  return 0
+}
+
 # Return 0 (true) if this host is locked to its host-global identity.
 ntfy_host_is_locked() {
-  # LifeOS marker present => locked, regardless of config contents. (The
-  # marker directory is still literally named PAI — LifeOS's former brand.)
-  [ -d "${_ntfy_home}/.claude/PAI" ] && return 0
+  # LifeOS marker present => locked, regardless of config contents.
+  ntfy_lifeos_marker >/dev/null && return 0
   # Otherwise locked unless the host-global config explicitly opts in.
   local hg="${_ntfy_home}/.claude/ntfy-bus.config.json"
   local optin="false"
@@ -76,9 +102,9 @@ ntfy_host_is_locked() {
 # WHY a host is locked, for callers that must explain a refusal (onboard.sh).
 # One place answers, so no caller re-probes the marker directory inline and
 # drifts when its (legacy) name changes. Prints one of:
-#   pai-marker | no-config | no-optin | unlocked
+#   lifeos-marker | no-config | no-optin | unlocked
 ntfy_lock_reason() {
-  if [ -d "${_ntfy_home}/.claude/PAI" ]; then printf 'pai-marker'
+  if ntfy_lifeos_marker >/dev/null; then printf 'lifeos-marker'
   elif [ ! -f "${_ntfy_home}/.claude/ntfy-bus.config.json" ]; then printf 'no-config'
   elif ntfy_host_is_locked; then printf 'no-optin'
   else printf 'unlocked'

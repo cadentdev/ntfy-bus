@@ -41,6 +41,21 @@ esac
   || fail "no identity born on a locked host"
 cleanup
 
+# Issue #46: current LifeOS has ~/.claude/LIFEOS/ and no PAI dir. onboard_env
+# sets the opt-in flag, so before the fix this host sailed through to a write.
+echo "O1b: locked host (LIFEOS marker, no PAI dir, opt-in set) refuses cleanly (issue #46)"
+onboard_env
+mkdir -p "$ROOT/.claude/LIFEOS"
+rc=0; out=$( ( cd "$ROOT/repo"; HOME="$ROOT" NTFY_HOME="$ROOT" bash "$ONBOARD" NewAgent "$ROOT/repo" 2>&1 ) ) || rc=$?
+assert_eq "LIFEOS refusal exits 1" "1" "$rc"
+case "$out" in
+  *"host-locked"*"LIFEOS"*) pass "refusal names the lock and the marker that produced it" ;;
+  *) fail "refusal names the lock and the marker that produced it (got: '$out')" ;;
+esac
+[ ! -f "$ROOT/repo/.claude/ntfy-bus.config.json" ] && pass "no identity born on a LIFEOS-marked host" \
+  || fail "no identity born on a LIFEOS-marked host"
+cleanup
+
 echo "O2: unopted host refuses, pointing at Setup"
 onboard_env
 jq '.per_repo_identity_allowed = false' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \

@@ -90,4 +90,41 @@ case "$out" in
 esac
 cleanup
 
+echo "D6: doctor names the host class and the marker that produced it (issue #46)"
+new_env
+out=$(run_doctor)
+case "$out" in
+  *"host class: vanilla"*"lock state: no-optin"*) pass "vanilla host reported, with its lock state" ;;
+  *) fail "vanilla host reported, with its lock state (got: '$out')" ;;
+esac
+mkdir -p "$ROOT/.claude/LIFEOS"
+out=$(run_doctor)
+case "$out" in
+  *"host class: lifeos (marker: ~/.claude/LIFEOS/)"*) pass "current-LifeOS marker reported" ;;
+  *) fail "current-LifeOS marker reported (got: '$out')" ;;
+esac
+case "$out" in
+  *"per_repo_identity_allowed"*) fail "no opt-in warning without the flag (got: '$out')" ;;
+  *) pass "no opt-in warning without the flag" ;;
+esac
+rmdir "$ROOT/.claude/LIFEOS"; mkdir -p "$ROOT/.claude/PAI"
+out=$(run_doctor)
+case "$out" in
+  *"host class: lifeos (marker: ~/.claude/PAI/)"*) pass "legacy marker reported" ;;
+  *) fail "legacy marker reported (got: '$out')" ;;
+esac
+cleanup
+
+echo "D7: LifeOS host carrying the per-repo opt-in flag gets a warning (issue #46)"
+new_env
+mkdir -p "$ROOT/.claude/LIFEOS"
+jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \
+  && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
+out=$(run_doctor)
+case "$out" in
+  *"warn  "*"per_repo_identity_allowed: true on a LifeOS host"*) pass "inert opt-in flag warned" ;;
+  *) fail "inert opt-in flag warned (got: '$out')" ;;
+esac
+cleanup
+
 finish

@@ -55,13 +55,13 @@ ntfy rejects bodies over ~4096 bytes with `40014 invalid request: attachments no
 All workflows resolve the config path through the shared guard
 `lib/resolve-config.sh`, which sets `$NTFY_CONFIG`. Resolution has two classes:
 
-- **Host-locked (LifeOS)** — `~/.claude/PAI/` exists (the LifeOS marker
-  directory, named for its former brand), or the host-global config does
+- **Host-locked (LifeOS)** — a LifeOS marker directory exists
+  (`~/.claude/LIFEOS/`, or the legacy `~/.claude/PAI/`), or the host-global config does
   not set `per_repo_identity_allowed: true`. Always uses the host-global
   `~/.claude/ntfy-bus.config.json`; any repo-local identity config is ignored.
   This is default-safe: a fresh host is locked.
 - **Vanilla opt-in** — the host-global config sets `per_repo_identity_allowed: true`
-  and no `~/.claude/PAI/`. Inside a repo, the repo-local
+  and no LifeOS marker directory. Inside a repo, the repo-local
   `<repo>/.claude/ntfy-bus.config.json` (untracked, per-contributor) IS the
   identity; a repo without one resolves to NOTHING (source `none`, empty
   `$NTFY_CONFIG`) and every workflow refuses to act — there is no host-global

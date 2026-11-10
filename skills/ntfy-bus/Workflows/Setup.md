@@ -5,8 +5,9 @@ Per-host (and, on vanilla hosts, per-repo) setup of the bus identity.
 Identity resolution is governed by the shared guard in `lib/resolve-config.sh`.
 This workflow writes the config(s) that guard reads. Two host classes:
 
-- **LifeOS host** (`~/.claude/PAI/` exists — the marker directory keeps
-  LifeOS's former name) — one identity per host, host-locked.
+- **LifeOS host** (a LifeOS marker directory exists: `~/.claude/LIFEOS/`, or
+  the legacy `~/.claude/PAI/` from LifeOS's former name) — one identity per
+  host, host-locked.
   Setup writes ONLY the host-global config and **refuses** to create a
   repo-local identity config (write-time half of the hijack guard).
 - **Vanilla host** — may opt in to per-repo identity, where the atomic unit of
@@ -14,10 +15,26 @@ This workflow writes the config(s) that guard reads. Two host classes:
 
 ## Step 0: Detect Host Class
 
+Ask the shared lib — never probe the marker directory inline (its name has
+changed before; the lib is the one place that knows every name, issue #46).
+Setup runs before any identity exists, so the resolver's "unresolved" chatter
+is expected here and silenced; `ntfy_require_config` is deliberately NOT called
+in this step.
+
 ```bash
-if [ -d "$HOME/.claude/PAI" ]; then HOST_CLASS=pai; else HOST_CLASS=vanilla; fi
-echo "host class: $HOST_CLASS"
+. "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh" >/dev/null 2>&1
+HOST_CLASS=$(ntfy_host_class 2>/dev/null) || HOST_CLASS=""
+case "$HOST_CLASS" in
+  lifeos)  echo "host class: lifeos (marker: ~/.claude/$(ntfy_lifeos_marker)/)" ;;
+  vanilla) echo "host class: vanilla" ;;
+  *)       echo "CANNOT detect host class — the skill lib did not load. STOP." >&2 ;;
+esac
 ```
+
+If that prints `CANNOT detect host class`, **STOP**: fix the skill install
+first. Never continue as `vanilla` by default — that is the unlocked branch,
+and a host class you could not determine must not be the one that offers
+per-repo identity.
 
 On a **vanilla** host, ask the user:
 
@@ -81,7 +98,8 @@ single switch that unlocks repo-local identity, and it is **false on LifeOS host
 always**.
 
 ```bash
-if [ "$HOST_CLASS" = pai ]; then PER_REPO=false; else PER_REPO="${PER_REPO:-false}"; fi
+# Only a host positively detected as vanilla may opt in; anything else is false.
+if [ "$HOST_CLASS" = vanilla ]; then PER_REPO="${PER_REPO:-false}"; else PER_REPO=false; fi
 
 cat > "$HOME/.claude/ntfy-bus.config.json" <<EOF
 {
@@ -126,7 +144,8 @@ working while nothing can ever send or wake as an agent the repo never named.
 
 ## Step 6: (Vanilla, per-repo only) Write the Repo-Local Identity + Wiring
 
-> **LifeOS guard:** if `$HOST_CLASS` is `pai`, STOP here. Do **not** write a
+> **LifeOS guard:** if `$HOST_CLASS` is anything other than `vanilla`
+> (`lifeos`, or empty because detection failed), STOP here. Do **not** write a
 > repo-local identity config — an identity-bearing tracked config must not even
 > be born on a LifeOS host. The read-time guard in `resolve-config.sh` would ignore
 > it anyway; this is the belt-and-suspenders write-time half.

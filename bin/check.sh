@@ -122,6 +122,11 @@ t=$(git -C "$REPO" ls-files -- '.claude/ntfy-bus.config.json' '*/.claude/ntfy-bu
 # advertises cron and daemons — the exact contexts issue #37 changed), so the
 # pairing gate covers it alongside the Workflows.
 for f in "$SKILL"/Workflows/*.md "$REPO/README.md"; do
+  # Setup is the one Workflow that runs BEFORE an identity exists: it sources
+  # the resolver only to ask the host class (issue #46), and requiring a
+  # resolved config there would make first-time setup impossible. Exempted by
+  # name, out loud — not by its prose happening to contain the gate's name.
+  [ "$(basename "$f")" = "Setup.md" ] && continue
   grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*resolve-config\.sh' "$f" || continue
   grep -q 'ntfy_require_config' "$f" || bad "doc sources resolver without ntfy_require_config: $f"
 done
@@ -147,6 +152,19 @@ else
   pv=$(jq -r '.version // ""' "$REPO/.claude-plugin/plugin.json" 2>/dev/null)
   [ "$pv" = "$v" ] || bad "plugin.json version '$pv' != VERSION '$v'"
 fi
+
+# 11. LifeOS host detection has ONE home (issue #46): ntfy_lifeos_marker in
+# lib/resolve-config.sh. The marker directory was renamed once (PAI ->
+# LIFEOS) while three inline `[ -d ~/.claude/PAI ]` probes each kept the old
+# name, which classed real LifeOS hosts as vanilla and switched off every
+# write-time guard keyed on that class. So: no shell code, and no Workflow
+# snippet, may test for a marker directory by path. The lib builds the path
+# from a name list and so never matches; prose that merely NAMES a marker
+# (no test operator on the line) is fine.
+MARKER_RE='(-[de]|test)[^#]*\.claude/(PAI|LIFEOS)'                              # gate-literal
+ban "-E" "^[^#]*$MARKER_RE" 'inline LifeOS marker probe (call ntfy_lifeos_marker / ntfy_host_class instead)'
+h=$(grep -En -- "$MARKER_RE" "$SKILL"/Workflows/*.md "$SKILL/SKILL.md" "$REPO/README.md" /dev/null 2>/dev/null)
+[ -n "$h" ] && bad "doc snippet probes the LifeOS marker inline (call ntfy_host_class instead): $(printf '%s' "$h" | tr '\n' ' ')"
 
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

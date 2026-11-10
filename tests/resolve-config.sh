@@ -42,6 +42,42 @@ jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$
   && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
 mkdir -p "$ROOT/.claude/PAI"
 assert_true  "PAI marker wins over opt-in" in_env 'ntfy_host_is_locked'
+assert_eq    "PAI: lock reason"  "lifeos-marker" "$(in_env 'ntfy_lock_reason')"
+assert_eq    "PAI: marker named" "PAI"           "$(in_env 'ntfy_lifeos_marker')"
+assert_eq    "PAI: host class"   "lifeos"        "$(in_env 'ntfy_host_class')"
+cleanup
+
+# Issue #46: current LifeOS creates ~/.claude/LIFEOS/ and NO ~/.claude/PAI/.
+# Keyed on PAI alone, such a host was classed vanilla and its opt-in flag
+# unlocked it — the exact hijack the lock exists to stop. The fixture is the
+# real attack shape: opt-in flag set, identity-bearing repo present.
+echo "L4b: LIFEOS marker (current LifeOS, no PAI dir) forces LOCKED even with opt-in (issue #46)"
+new_env
+jq '.per_repo_identity_allowed = true' "$ROOT/.claude/ntfy-bus.config.json" > "$ROOT/c" \
+  && mv "$ROOT/c" "$ROOT/.claude/ntfy-bus.config.json"
+mkdir -p "$ROOT/.claude/LIFEOS" "$ROOT/fakerepo/.claude"
+echo '{ "agent_id": "RepoAgent" }' > "$ROOT/fakerepo/.claude/ntfy-bus.config.json"
+in_repo() { ( export NTFY_HOME="$ROOT" CLAUDE_PROJECT_DIR="$ROOT/fakerepo"; cd /; . "$RESOLVER" >/dev/null 2>&1; eval "$1" ); }
+assert_true  "LIFEOS marker wins over opt-in" in_env 'ntfy_host_is_locked'
+assert_eq    "LIFEOS: lock reason"  "lifeos-marker" "$(in_env 'ntfy_lock_reason')"
+assert_eq    "LIFEOS: marker named" "LIFEOS"        "$(in_env 'ntfy_lifeos_marker')"
+assert_eq    "LIFEOS: host class"   "lifeos"        "$(in_env 'ntfy_host_class')"
+assert_eq    "LIFEOS + opt-in: repo-local identity IGNORED" "host-global" "$(in_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+assert_eq    "LIFEOS + opt-in: resolves the host's own config" "$ROOT/.claude/ntfy-bus.config.json" "$(in_repo 'printf %s "$NTFY_CONFIG"')"
+# Control: the same fixture minus the marker must UNLOCK — otherwise the
+# assertions above could pass for a reason other than the marker.
+rmdir "$ROOT/.claude/LIFEOS"
+assert_eq    "control, no marker: repo-local preferred" "repo-local" "$(in_repo 'printf %s "$NTFY_IDENTITY_SOURCE"')"
+cleanup
+
+echo "L4c: vanilla host reports no marker, and says so with a non-zero return"
+new_env
+assert_false "no marker: predicate is false" in_env 'ntfy_lifeos_marker'
+assert_eq    "no marker: prints nothing" ""        "$(in_env 'ntfy_lifeos_marker')"
+assert_eq    "no marker: host class"     "vanilla" "$(in_env 'ntfy_host_class')"
+# A plain FILE of the marker's name is not a LifeOS install.
+: > "$ROOT/.claude/LIFEOS"
+assert_eq    "marker name as a plain file: still vanilla" "vanilla" "$(in_env 'ntfy_host_class')"
 cleanup
 
 echo "L5: explicit opt-in on a vanilla host UNLOCKS"
