@@ -22,13 +22,23 @@ A running waker says whose it is.
   unchanged. Every identity on a shared-`$HOME` host used to run the
   byte-identical command line, and twice an agent saw another identity's
   waker in `ps`, concluded its own was armed, and sat silently unarmed. Now
-  `pgrep -fl 'ntfy-bus-waker.sh Alice$'` finds Alice's waker and nobody
-  else's. How you launch it does not change. A waker already running from an
-  older version shows no identity until its next re-arm.
+  `ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh Alice$'` is a quick look
+  at whether Alice's is up. It is a hint, not proof;
+  `bin/ntfy-waker-status.sh` remains the real check. How you launch the waker
+  does not change. A waker already running from an older version shows no
+  identity until its next re-arm.
+- **The waker refuses a name that disagrees with its config** (#45).
+  `ntfy-bus-waker.sh Bob` (or `NTFY_WAKER_IDENTITY=Bob`) in a directory whose
+  bus config is Alice's used to start: it watched Alice's inbox, called
+  itself Bob, and filtered self-sent mail by the wrong name. It now exits
+  with a FATAL naming both. **Migration:** launch with no argument, and
+  remove any `NTFY_WAKER_IDENTITY` exported for more than one identity. A
+  matching name is still accepted, in any letter case; a config with no
+  `agent_id` (pre-backfill) still takes the name as given.
 - **The arm prompt says how to check later** (#45). `hooks/arm-bus-waker.sh`
   fires only at SessionStart; after the first wake the agent was on its own
   and reached for a bare `ps`. The prompt now names
-  `bin/ntfy-waker-status.sh` and the identity-specific `pgrep`, and says
+  `bin/ntfy-waker-status.sh`, shows the identity-specific `ps` line, and says
   that some waker running is not proof that yours is.
 
 ## [0.3.3] — 2026-11-11

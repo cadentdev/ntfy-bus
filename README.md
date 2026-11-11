@@ -532,10 +532,13 @@ script for every identity, so a bare `ps | grep ntfy-bus-waker` shows a live
 waker without telling you *whose* it is — on a shared-`$HOME` host that
 ambiguity has twice produced a real false positive, one identity reading
 another's waker as its own. Since 0.3.4 the session waker puts its identity in
-`argv` (it re-execs itself once, same pid, with the resolved identity as `$1`),
-so `pgrep -fl 'ntfy-bus-waker.sh Alice$'` answers "is *mine* running" directly,
-and the arm hook's prompt names both that and this tool. A waker started by an
-older version shows no identity until it is next re-armed. The status tool
+`argv` (it re-execs itself once, same pid, with its config's `agent_id` as
+`$1`, and refuses to start under any other name), so
+`ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh Alice$'` gives a quick
+answer to "is *mine* running", and the arm hook's prompt names both that and
+this tool. Treat the `ps` line as a hint: a waker started by an older version
+shows no identity until it is next re-armed, and a process list can be matched
+by things that are not wakers. The status tool
 still does more: it derives every path from config exactly as the waker does,
 and shows inbox age. Two things worth knowing before you read its output:
 identity is resolved from the working directory, and its identity discovery is

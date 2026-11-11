@@ -149,9 +149,10 @@ is_known_waker() {
 }
 
 # WHICH JOB a row represents, read from the running process's COMMAND — not
-# from the pidfile's name. The distinction matters: identity is invisible in
-# argv (every identity runs the same script), but the JOB is not, because the
-# two jobs are different scripts. So this is evidence, not a naming heuristic
+# from the pidfile's name. The distinction matters: identity is not reliably in
+# argv (every identity runs the same script; the session waker appends its
+# identity since 0.3.4, older ones and the daemon do not), but the JOB always
+# is, because the two jobs are different scripts. So this is evidence, not a naming heuristic
 # like identity_key, and it stays correct when a host config sets a pidfile
 # path that does not follow the usual stem convention.
 #

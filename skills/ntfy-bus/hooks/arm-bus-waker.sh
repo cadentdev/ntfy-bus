@@ -110,10 +110,12 @@ until the next message arrives.
 
 To check later whether YOUR waker is still armed, run:
     bash ${STATUS}
-or look for your identity in the process list:
-    pgrep -fl 'ntfy-bus-waker.sh ${ID}\$'
+That is the real check. For a quick look, a waker started by this version
+ends its command line with its identity:
+    ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh ${ID}\$'
 Do NOT conclude you are armed because some 'ntfy-bus-waker.sh' is running —
-other identities on this host run the same script. Only one whose command
-line ends in '${ID}' is yours.
+other identities on this host run the same script. And do not stop a waker
+because it shows no name: one started by an older version shows none, and the
+status tool still tells you whose it is.
 EOF
 exit 0

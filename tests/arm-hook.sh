@@ -64,9 +64,14 @@ esac
 tool=$(printf '%s\n' "$out" | grep -o '/[^ ]*bin/ntfy-waker-status.sh' | head -1)
 [ -n "$tool" ] && [ -f "$tool" ] && pass "the named status tool exists" \
   || fail "the named status tool exists (got: '$tool')"
+# The whole line, anchor and quotes included: a prompt that renders a broken
+# or unanchored command is worse than none.
+want="    ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh TestAgent\$'"
+if printf '%s\n' "$out" | grep -qxF -- "$want"; then pass "prompt shows the exact identity-specific ps line"
+else fail "prompt shows the exact identity-specific ps line (want: $want)"; fi
 case "$out" in
-  *"ntfy-bus-waker.sh TestAgent"*) pass "prompt shows the identity-specific process match" ;;
-  *) fail "prompt shows the identity-specific process match" ;;
+  *"older version shows none"*) pass "prompt warns an unnamed waker may still be yours" ;;
+  *) fail "prompt warns an unnamed waker may still be yours" ;;
 esac
 cleanup
 
