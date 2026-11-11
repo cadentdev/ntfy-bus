@@ -10,6 +10,27 @@ change behavior (each such change is called out under **Security** or
 The root `VERSION` file is the source of truth; `bin/check.sh` §10 enforces
 that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
+## [0.3.4] — 2026-11-11
+
+A running waker says whose it is.
+
+### Changed
+- **The session waker puts its identity in its command line** (#45).
+  `daemons/ntfy-bus-waker.sh` launched without an argument — the documented
+  way — resolves its identity, then re-execs itself once with that identity
+  as `$1`. Same pid, so harness tracking, the pidfile, and the wake are
+  unchanged. Every identity on a shared-`$HOME` host used to run the
+  byte-identical command line, and twice an agent saw another identity's
+  waker in `ps`, concluded its own was armed, and sat silently unarmed. Now
+  `pgrep -fl 'ntfy-bus-waker.sh Alice$'` finds Alice's waker and nobody
+  else's. How you launch it does not change. A waker already running from an
+  older version shows no identity until its next re-arm.
+- **The arm prompt says how to check later** (#45). `hooks/arm-bus-waker.sh`
+  fires only at SessionStart; after the first wake the agent was on its own
+  and reached for a bare `ps`. The prompt now names
+  `bin/ntfy-waker-status.sh` and the identity-specific `pgrep`, and says
+  that some waker running is not proof that yours is.
+
 ## [0.3.3] — 2026-11-11
 
 One bad inbox line, or one odd message id, no longer costs the mail around it.

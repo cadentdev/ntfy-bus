@@ -48,6 +48,9 @@
 #
 # Usage:  ntfy-bus-waker.sh [Identity]
 # Launch backgrounded from the agent's repo cwd so identity stays consistent.
+# Launched without an argument it re-execs itself once with the resolved
+# identity as $1 (same pid), so the process list shows whose waker it is:
+#   pgrep -f 'ntfy-bus-waker.sh Alice$'
 set -u
 
 # Identity resolution (fleet review, 2026-06-28): explicit arg/env wins
@@ -88,6 +91,19 @@ ME="${1:-${NTFY_WAKER_IDENTITY:-}}"
 if [ -z "$ME" ]; then
   echo "FATAL: no identity (no arg, no \$NTFY_WAKER_IDENTITY, no resolvable .agent_id)" >&2
   exit 1
+fi
+# Put the identity in argv (issue #45). Every identity on a shared-$HOME host
+# otherwise runs the byte-identical command line, and `ps`/`pgrep` shows "a
+# waker" without saying whose — twice an agent took another identity's waker
+# for its own and sat silently unarmed. `exec` replaces this process in place:
+# SAME pid, so the harness keeps tracking it and its exit is still the wake.
+# This must stay ABOVE the pidfile claim and the EXIT trap (nothing stateful
+# has happened yet). It cannot loop: the second pass has $1 = $ME, the
+# highest-precedence source, so it resolves the same identity and skips this.
+# "$0", not the resolved path: keep the path the caller launched (the install
+# symlink), which is what people grep for.
+if [ "${1:-}" != "$ME" ]; then
+  exec "${BASH:-bash}" "$0" "$ME"
 fi
 id_lc="$(echo "$ME" | tr '[:upper:]' '[:lower:]')"
 # Inbox comes from config — the SAME key the durable daemon follows, so the two

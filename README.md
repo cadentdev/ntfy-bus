@@ -528,14 +528,19 @@ your shim to this repo's internal layout, and on a plugin install there is no
 repo above the skill for it to reach.
 
 `ntfy-waker-status.sh` exists because `daemons/ntfy-bus-waker.sh` is the same
-script for every identity, so `ps | grep` shows a live waker without telling you
-*whose* it is — on a shared-`$HOME` host that ambiguity has produced a real
-false positive, one identity reading another's waker as its own. It derives
-every path from config exactly as the waker does, rather than guessing by naming
-convention. Two consequences worth knowing before you read its output: identity
-is resolved from the working directory and is invisible in `argv`, and its
-identity discovery is necessarily a heuristic — a host cannot enumerate
-identities it was never told about.
+script for every identity, so a bare `ps | grep ntfy-bus-waker` shows a live
+waker without telling you *whose* it is — on a shared-`$HOME` host that
+ambiguity has twice produced a real false positive, one identity reading
+another's waker as its own. Since 0.3.4 the session waker puts its identity in
+`argv` (it re-execs itself once, same pid, with the resolved identity as `$1`),
+so `pgrep -fl 'ntfy-bus-waker.sh Alice$'` answers "is *mine* running" directly,
+and the arm hook's prompt names both that and this tool. A waker started by an
+older version shows no identity until it is next re-armed. The status tool
+still does more: it derives every path from config exactly as the waker does,
+and shows inbox age. Two things worth knowing before you read its output:
+identity is resolved from the working directory, and its identity discovery is
+necessarily a heuristic — a host cannot enumerate identities it was never told
+about.
 
 ## Running the tests
 
