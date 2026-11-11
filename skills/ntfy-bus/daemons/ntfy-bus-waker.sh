@@ -160,13 +160,21 @@ mark_seen() { bus_mark_seen "$1" "$SEEN" "$SEEN_CAP" "$SEEN_KEEP"; }
 # Emit "id<US>date<US>title" (US = \x1f, the ASCII unit separator) for every message on stdin that is addressed to us, not
 # self-sent, and not automation noise. One matcher, used by both the arm-time gap
 # scan and the in-arm loop, so the two can never drift.
+#
+# Line-at-a-time on purpose (issue #52): -R hands jq each inbox line as a
+# string and inbox_objects (lib/routing.sh) turns it into its message
+# object(s), skipping a line that does not parse. Fed the raw stream, jq STOPS
+# at the first corrupt line — and with stderr discarded every message after it
+# was silently invisible until the line left the scan window.
+# msg_key (same lib) is the ledger key, shared with the durable daemon.
 match_scan() {
-  jq -r --arg me "$id_lc" --arg f "$FILTERS" --arg noise "$NOISE" "$BUS_ROUTING_DEFS"'
-      select(.event == "message")
+  jq -R -r --arg me "$id_lc" --arg f "$FILTERS" --arg noise "$NOISE" "$BUS_ROUTING_DEFS"'
+      inbox_objects
+      | select(.event == "message")
       | select(addressed_to($f))
       | select(msg_sender != $me)
       | select((msg_sender | test($noise)) | not)
-      | "\(.id)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | gsub("[\t\n\r\u001f]"; " "))"' 2>/dev/null
+      | "\(msg_key)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | gsub("[\t\n\r\u001f]"; " "))"' 2>/dev/null
 }
 # Why US and not TAB: tab is IFS-whitespace, so `read` collapses an empty field
 # and shifts the rest left (a date read as an id). US is not whitespace, so

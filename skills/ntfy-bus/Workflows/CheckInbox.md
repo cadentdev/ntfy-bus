@@ -63,12 +63,15 @@ case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
 . "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/routing.sh"
 FILTERS=$(printf '%s' "$RECIPIENT_FILTERS" | jq -r 'join("|")')
 tail -n 200 "$INBOX_JSONL" \
-  | jq -c --arg filters "$FILTERS" "$BUS_ROUTING_DEFS"'
+  | jq -R -c --arg filters "$FILTERS" "$BUS_ROUTING_DEFS"'
+      inbox_objects |
       select(.event == "message") |
       select(.title != null) |
       select(addressed_to($filters))
     '
 ```
+
+Note: `-R` with `inbox_objects` (from `lib/routing.sh`) reads the inbox one line at a time and skips a line that is not valid JSON. Do not drop either: fed the raw stream, jq stops at the first corrupt line and every message after it silently disappears from this read (issue #52). A skipped line is skipped quietly — if a sender says they sent something you cannot see, look at the raw file.
 
 Note: the `select(.title != null)` guard is required — JSONL watcher entries with `event != "message"` may have null titles even after the event filter (e.g. heartbeats that occasionally leak through), and `test()` against null throws `null (null) cannot be matched`. Same guard applies to the HTTP path in Step 3b.
 

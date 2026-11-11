@@ -72,4 +72,37 @@ echo "R11: chained ' to ' folds — first pointer wins for sender, any recipient
 assert_true  "'Alice to Bob to Carol:' hits Carol" routes "Alice to Bob to Carol: hi" "Carol|ALL"
 assert_eq    "chained sender is alice"           "alice" "$(sender_of 'Alice to Bob to Carol: hi')"
 
+# --- inbox_objects / msg_key (issue #52) ---
+objs() { printf '%s\n' "$@" | jq -R -c "$BUS_ROUTING_DEFS"' inbox_objects | .id'; }
+key_of() { printf '%s\n' "$1" | jq -r "$BUS_ROUTING_DEFS"' msg_key'; }
+
+echo "R20: inbox_objects — a bad line costs only itself"
+assert_eq "clean lines pass through" '"a""b"' "$(objs '{"id":"a"}' '{"id":"b"}' | tr -d '\n')"
+assert_eq "a truncated line is skipped, later lines kept" '"a""c"' \
+  "$(objs '{"id":"a"}' '{"id":"b","tit' '{"id":"c"}' | tr -d '\n')"
+assert_eq "non-objects and blanks are dropped" '"z"' \
+  "$(objs '42' '"s"' '[1]' 'null' 'true' '' '   ' 'not json' '{"id":"z"}' | tr -d '\n')"
+assert_eq "trailing CR is tolerated" '"cr"' "$(objs "$(printf '{"id":"cr"}\r')" | tr -d '\n')"
+
+echo "R21: inbox_objects — objects glued on one line are all recovered"
+assert_eq "two glued" '"a""b"' "$(objs '{"id":"a"}{"id":"b"}' | tr -d '\n')"
+assert_eq "three glued" '"a""b""c"' "$(objs '{"id":"a"}{"id":"b"}{"id":"c"}' | tr -d '\n')"
+assert_eq "a valid object containing }{ in a string is ONE object" '"x"' \
+  "$(objs '{"id":"x","title":"a}{b"}' | tr -d '\n')"
+assert_eq "glued onto a torn fragment: nothing invented" '"after"' \
+  "$(objs '{"id":"t1","time":17{"id":"t2"}' '{"id":"after"}' | tr -d '\n')"
+
+echo "R22: msg_key — one line, one field, never the literal null for a missing id"
+assert_eq "string id is itself"        "abc"      "$(key_of '{"id":"abc","time":5,"title":"T"}')"
+assert_eq "missing id -> time:title"   "5:T"      "$(key_of '{"time":5,"title":"T"}')"
+assert_eq "null id -> time:title"      "5:T"      "$(key_of '{"id":null,"time":5,"title":"T"}')"
+assert_eq "empty id -> time:title"     "5:T"      "$(key_of '{"id":"","time":5,"title":"T"}')"
+assert_eq "no time -> received"        "9:T"      "$(key_of '{"received":9,"title":"T"}')"
+assert_eq "object id stays one line"   '{"k":1}'  "$(key_of '{"id":{"k":1},"title":"T"}')"
+assert_eq "numeric id is its text"     "0"        "$(key_of '{"id":0,"title":"T"}')"
+assert_eq "false id is its text"       "false"    "$(key_of '{"id":false,"title":"T"}')"
+assert_eq "newline/tab in an id fold to a space" "a b c" "$(key_of '{"id":"a\nb\tc"}')"
+assert_eq "key is always exactly one line" "1" \
+  "$(key_of '{"id":{"k":[1,2]},"title":"x\ny"}' | wc -l | tr -d ' ')"
+
 finish
