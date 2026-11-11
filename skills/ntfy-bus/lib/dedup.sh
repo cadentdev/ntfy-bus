@@ -23,7 +23,10 @@ bus_cap_trim() {
 bus_seen() {
   local id="$1" f="$2"
   [ -f "$f" ] || return 1
-  grep -qxF "$id" "$f"
+  # `--` is load-bearing (issue #52): an id starting with '-' is otherwise read
+  # as grep options — it never matches (re-wake on every arm), and '-e' makes
+  # grep take FILE as the pattern and read the caller's stdin instead.
+  grep -qxF -- "$id" "$f"
 }
 
 bus_mark_seen() {

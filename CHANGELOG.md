@@ -10,6 +10,35 @@ change behavior (each such change is called out under **Security** or
 The root `VERSION` file is the source of truth; `bin/check.sh` §10 enforces
 that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
+## [0.3.3] — 2026-11-11
+
+One bad inbox line, or one odd message id, no longer costs mail.
+
+### Fixed
+- **A corrupt line in the inbox JSONL no longer hides every message after
+  it** (#52). The in-session waker (`daemons/ntfy-bus-waker.sh`) and
+  CheckInbox's JSONL read fed the inbox to one `jq`, which stops at the first
+  line it cannot parse; with stderr discarded, everything after that line was
+  silently invisible — no wake, nothing listed — until the line scrolled out
+  of the scan window (1000 lines for the waker, 200 for CheckInbox). Both now
+  read line by line (`jq -R` + `fromjson?`) and skip a line that is not a
+  JSON object. The bad line itself is skipped without a notice.
+- **A message id starting with `-` is now remembered as seen** (#52).
+  `bus_seen` (`lib/dedup.sh`) passed the id to `grep` without `--`, so it was
+  read as options: the id never matched and the message re-woke on every
+  arm, and an id of `-e` made grep read the caller's stdin, swallowing the
+  rest of that scan. Real ntfy ids are alphanumeric; this is hardening.
+- **Messages with no `.id` are each delivered once** (#52). The waker
+  recorded a missing id as the literal `null`, so the first id-less message
+  woke and every later one was suppressed. A missing or empty id now falls
+  back to `time:title`, the same key the durable daemon already uses.
+
+### Changed
+- The waker and CheckInbox now require the inbox to be JSONL — one object per
+  line — which is what the poller and the LifeOS watcher both write. A
+  pretty-printed object spanning several lines was readable before and is
+  skipped now.
+
 ## [0.3.2] — 2026-11-10
 
 Plugin-only installs can run the Workflows.

@@ -257,4 +257,102 @@ assert_false "no junk id from a title fragment in the ledger" in_ledger "line tw
 assert_true "n2 in ledger" in_ledger n2
 cleanup
 
+# --- a bad line or an odd id must not cost mail (issue #52) ---
+# match_scan fed the whole window to one jq. jq stops at the first line it
+# cannot parse, so one corrupt line hid every message after it — silently,
+# stderr being discarded — until it scrolled out of the scan window.
+CORRUPT='{"event":"message","id":"bad1","tit'
+
+echo "T19: a corrupt line does not hide the messages after it (re-arm scan, #52)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+emit c1 "Dana->TestAgent: before the bad line"
+printf '%s\n' "$CORRUPT" >> "$INBOX"
+emit c2 "Dana->TestAgent: after the bad line"
+emit c3 "Dana->ALL: also after"
+arm "$ROOT/o2" 3
+assert_eq "all three real messages counted" \
+  "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "message after the bad line listed" "$ROOT/o2" 'Dana->TestAgent: after the bad line'
+assert_true "c2 in ledger" in_ledger c2
+assert_true "c3 in ledger" in_ledger c3
+arm "$ROOT/o3" 2
+expect "nothing re-wakes with the bad line still in the window" nowake "$ROOT/o3"
+cleanup
+
+echo "T20: a corrupt line arriving while armed does not hide its neighbours (#52)"
+new_env
+"$WAKER" TestAgent > "$ROOT/o" 2>&1 & P=$!
+sleep 2
+INBOX_REAL="$INBOX"; INBOX="$ROOT/burst"; : > "$INBOX"
+printf '%s\n' "$CORRUPT" >> "$INBOX"
+emit l1 "Dana->TestAgent: live, after a bad line"
+INBOX="$INBOX_REAL"; cat "$ROOT/burst" >> "$INBOX"
+sleep 3; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+assert_eq "live message behind a bad line wakes" \
+  "WAKE: 1 message (0 backlog, 1 new)" "$(summary "$ROOT/o")"
+cleanup
+
+echo "T21: first arm suppresses the backlog on BOTH sides of a corrupt line (#52)"
+# Otherwise the fix would turn old, already-handled history into a wake.
+new_env; emit h1 "Dana->TestAgent: history one"
+printf '%s\n' "$CORRUPT" >> "$INBOX"
+emit h2 "Dana->TestAgent: history two"
+arm "$ROOT/o1" 2
+expect "first arm stays silent" nowake "$ROOT/o1"
+assert_true "history before the bad line marked" in_ledger h1
+assert_true "history after the bad line marked" in_ledger h2
+arm "$ROOT/o2" 2
+expect "re-arm does not wake on that history" nowake "$ROOT/o2"
+cleanup
+
+echo "T22: lines that are JSON but not a message object are skipped, not fatal (#52)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '%s\n' '42' '"just a string"' '[1,2]' 'null' '' '   ' 'not json at all' '{"event":"message"' >> "$INBOX"
+emit j1 "Dana->TestAgent: after the junk"
+arm "$ROOT/o2" 3
+assert_eq "the one real message is delivered" \
+  "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o2")"
+cleanup
+
+echo "T23: an id starting with '-' is remembered as seen (#52)"
+# bus_seen handed the id to grep with no '--', so grep read it as options,
+# never matched, and the message re-woke on every arm.
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+# '-e' goes first: unfixed, grep takes the ledger path as its pattern and reads
+# stdin, which here is the rest of the scan — the messages behind it vanish.
+emit "-e" "Dana->TestAgent: dash e id"
+emit "-c4" "Dana->TestAgent: dash id"
+emit "--help" "Dana->TestAgent: double dash id"
+arm "$ROOT/o2" 3
+assert_eq "all three delivered once" "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o2")"
+arm "$ROOT/o3" 2
+expect "dash ids do not re-wake" nowake "$ROOT/o3"
+assert_false "no grep usage error leaks into the output" grep -Eqi 'usage|invalid option|unrecognized' "$ROOT/o2" "$ROOT/o3"
+cleanup
+
+echo "T24: messages with no id are each delivered once (#52)"
+# A missing .id used to be recorded as the literal 'null': the first id-less
+# message woke, and every later one was suppressed as already seen.
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '{"event":"message","time":1756155600,"title":"Dana->TestAgent: no id, first","message":"b"}\n' >> "$INBOX"
+arm "$ROOT/o2" 3
+assert_eq "first id-less message delivered" "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o2")"
+printf '{"event":"message","time":1756155601,"title":"Dana->TestAgent: no id, second","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":"","time":1756155602,"title":"Dana->TestAgent: empty id","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":null,"time":1756155603,"title":"Dana->TestAgent: null id","message":"b"}\n' >> "$INBOX"
+arm "$ROOT/o3" 3
+assert_eq "later id-less messages are not swallowed" \
+  "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o3")"
+assert_contains "second id-less listed" "$ROOT/o3" 'Dana->TestAgent: no id, second'
+assert_contains "empty-id listed" "$ROOT/o3" 'Dana->TestAgent: empty id'
+assert_contains "null-id listed" "$ROOT/o3" 'Dana->TestAgent: null id'
+assert_false "the literal 'null' is not used as an id" in_ledger null
+arm "$ROOT/o4" 2
+expect "id-less messages do not re-wake" nowake "$ROOT/o4"
+cleanup
+
 finish

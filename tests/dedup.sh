@@ -37,4 +37,22 @@ echo "D5: mark_seen enforces its cap"
 : > "$L"; for i in $(seq 1 6); do bus_mark_seen "cap-$i" "$L" 5 3; done
 assert_eq "ledger bounded after marks" "3" "$(wc -l < "$L" | tr -d ' ')"
 
+echo "D6: an id that looks like a grep option is still an id (issue #52)"
+# stdin is /dev/null on purpose: unfixed, `grep -qxF -e FILE` takes FILE as
+# the pattern and reads stdin — in the waker that swallows the rest of the
+# scan; here it would hang the suite.
+seen() { bus_seen "$@" < /dev/null; }
+: > "$L"
+assert_false "unseen '-c4' misses"             seen "-c4" "$L"
+bus_mark_seen "-c4" "$L"
+bus_mark_seen "--help" "$L"
+bus_mark_seen "-e" "$L"
+assert_true  "'-c4' hits once marked"          seen "-c4" "$L"
+assert_true  "'--help' hits once marked"       seen "--help" "$L"
+assert_true  "'-e' hits once marked"           seen "-e" "$L"
+assert_false "'-c' (a prefix) does not hit"    seen "-c" "$L"
+assert_false "'-v' does not invert into a hit" seen "-v" "$L"
+assert_eq "bus_seen prints nothing for an option-like id" "" "$(seen "--help" "$L" 2>&1)"
+assert_eq "bus_seen leaves its caller's stdin alone" "rest" "$(printf 'rest\n' | { bus_seen "-e" "$L"; cat; })"
+
 finish
