@@ -9,7 +9,12 @@ Resolve the config path through the shared guard, then extract fields:
 ```bash
 # Host-locked (LifeOS) hosts always get the host-global config; vanilla opt-in
 # hosts get the repo-local config when present.
-. "$HOME/.claude/skills/ntfy-bus/lib/resolve-config.sh"
+# Where the skill lives: anything at the stable install path wins, else the
+# absolute NTFY_SKILL_DIR you set (plugin install — see SKILL.md).
+NTFY_STABLE="$HOME/.claude/skills/ntfy-bus"
+if [ -e "$NTFY_STABLE" ] || [ -L "$NTFY_STABLE" ]; then NTFY_SKILL_DIR="$NTFY_STABLE"; fi
+case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
+. "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/resolve-config.sh"
 # GATE (issue #8): an unresolved identity refuses here, loudly. If this exits,
 # STOP the workflow — do not source another config or improvise an identity;
 # run the Setup workflow instead.
@@ -51,7 +56,11 @@ source of truth for the pointer-agnostic, header-scoped, `\b`-token matcher (see
 for why). Source it, then call `addressed_to($filters)`:
 
 ```bash
-. "$HOME/.claude/skills/ntfy-bus/lib/routing.sh"
+# Same lookup as Step 1 — this snippet may run in a fresh shell.
+NTFY_STABLE="$HOME/.claude/skills/ntfy-bus"
+if [ -e "$NTFY_STABLE" ] || [ -L "$NTFY_STABLE" ]; then NTFY_SKILL_DIR="$NTFY_STABLE"; fi
+case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
+. "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/routing.sh"
 FILTERS=$(printf '%s' "$RECIPIENT_FILTERS" | jq -r 'join("|")')
 tail -n 200 "$INBOX_JSONL" \
   | jq -c --arg filters "$FILTERS" "$BUS_ROUTING_DEFS"'

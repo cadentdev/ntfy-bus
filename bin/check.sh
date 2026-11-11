@@ -175,5 +175,21 @@ h=$(for f in "$SKILL"/Workflows/*.md "$SKILL/SKILL.md" "$REPO/README.md"; do
     done | grep -iE -- "$MARKER_RE")
 [ -n "$h" ] && bad "LifeOS marker path spelled out in a doc code block (call ntfy_host_class instead): $(printf '%s' "$h" | tr '\n' ' ')"
 
+# 12. Workflow snippets must not reach the skill's lib through the fixed
+# install path (issue #55). That path does not exist on a plugin-only install,
+# where the skill lives in a versioned plugin cache; snippets look at the
+# stable path first and then in NTFY_SKILL_DIR ("Finding the skill directory"
+# in SKILL.md). A snippet written the old way works on every host its author
+# owns and stops on a plugin-only one. The rule is deliberately blunt: NO line
+# of a Workflow code block may spell the lib's fixed path at all — sourced,
+# assigned to a variable first (Setup's own pre-fix form), or behind `&&`.
+# The lookup lines name the skill directory, never `.../lib/`, so they pass.
+# Prose may name the path; the README's shell snippets are for an operator's
+# own clone + symlink host. Not caught: a path assembled from parts.
+h=$(for f in "$SKILL"/Workflows/*.md; do
+      [ -f "$f" ] && awk -v F="$f" '/^[[:space:]]*```/{inb=!inb; next} inb{print F":"FNR":"$0}' "$f"
+    done | grep -F -- '.claude/skills/ntfy-bus/lib/')   # gate-literal
+[ -n "$h" ] && bad "Workflow snippet reaches the lib through the fixed install path (use the NTFY_SKILL_DIR lookup — see SKILL.md): $(printf '%s' "$h" | tr '\n' ' ')"
+
 [ "$fail" = "0" ] && say "check.sh: all green"
 exit "$fail"

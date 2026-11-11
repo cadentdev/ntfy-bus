@@ -10,6 +10,44 @@ change behavior (each such change is called out under **Security** or
 The root `VERSION` file is the source of truth; `bin/check.sh` §10 enforces
 that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
+## [0.3.2] — 2026-11-10
+
+Plugin-only installs can run the Workflows.
+
+### Fixed
+- **Setup, Send, CheckInbox, and Watch no longer assume the skill is at
+  `~/.claude/skills/ntfy-bus/`** (#55). On a plugin-only install that path
+  does not exist — the skill lives in the plugin cache — so every Workflow
+  stopped at its first line (Setup since 0.3.1, the others before). Snippets
+  now look at the stable path first and, only when nothing at all is there,
+  in `NTFY_SKILL_DIR`, which the agent sets to the skill's base directory
+  (absolute; "Finding the skill directory" in `SKILL.md`). With neither, they
+  stop; Setup still never continues as `vanilla`.
+  **No change on a host with anything at the stable path** — a working
+  install, a broken link, a stale copy: it wins, `NTFY_SKILL_DIR` is not
+  read, and a broken install stops exactly as before.
+
+### Changed
+- Setup Step 6b wires the BridgeBodyGuard hook only when the hook file exists
+  at the stable path, and says `NOT wiring` otherwise. It used to write the
+  entry unconditionally; a hook entry naming a missing file fails on every
+  Bash call. The plugin cache path is never wired (it moves on every update).
+- `bin/check.sh` §12 fails a Workflow code block that spells the lib's fixed
+  install path.
+- Setup Step 8 skips `bin/doctor.sh` when no clone sits behind the stable
+  path, instead of running whatever `bin/doctor.sh` is one directory up; it
+  now also follows a relative install symlink correctly.
+
+### Security
+- On a plugin-only host the resolver — lock included — is whatever
+  `NTFY_SKILL_DIR` names. A host that needs the lock to hold should keep the
+  stable path, where the variable is never read (`SKILL.md`, "What this
+  trusts").
+
+### Known gaps (plugin-only)
+- The durable poller, waker units, cron, statusline segment, and
+  BridgeBodyGuard hook still need the stable path. Add a clone + symlink install for those.
+
 ## [0.3.1] — 2026-11-10
 
 LifeOS hosts are recognized again.
