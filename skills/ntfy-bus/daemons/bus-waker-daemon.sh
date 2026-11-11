@@ -150,6 +150,10 @@ while [ ! -f "$INBOX" ]; do sleep 5; done
 # daemon was down aren't skipped; dedup makes the replay safe. In-loop jq
 # stderr is intentionally NOT swallowed: a routing.sh/jq regression must
 # surface in the journal, not masquerade as silence.
+# The ledger key is msg_key (lib/routing.sh), shared with the session waker.
+# It is always ONE line: an empty-string id used to key every such message as
+# "" (first notified, the rest suppressed), and a non-string id printed over
+# several lines, which grep -F then matched as alternatives (issue #52).
 tail -n "$STARTUP_TAIL" -F "$INBOX" | while IFS= read -r line; do
   TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)   # portable; BSD date has no -I
   M=$(printf '%s' "$line" | jq -c --arg f "$FILTERS" --arg self "$SELF" \
@@ -158,7 +162,7 @@ tail -n "$STARTUP_TAIL" -F "$INBOX" | while IFS= read -r line; do
         | select(addressed_to($f))
         | msg_sender as $s | select($s!=$self) | select(($s|test($noise))|not)
         | {ts: $ts, title: .title,
-           id: (.id // ((.time // .received // 0 | tostring) + ":" + .title))}')
+           id: msg_key}')
   [ -n "$M" ] || continue
   ID=$(printf '%s' "$M" | jq -r .id)
   bus_seen "$ID" "$SEEN" && continue          # already woke on this message — replay guard

@@ -135,4 +135,27 @@ esac
 kill -TERM "$D" 2>/dev/null; wait "$D" 2>/dev/null
 cleanup
 
+echo "W9: the daemon's ledger key — empty and non-string ids are each notified once (issue #52)"
+# `.id // fallback` kept an empty-string id (truthy), so every such message
+# keyed as "" — first notified, the rest suppressed. A non-string id printed
+# over several lines, which grep -F then matched as alternatives.
+daemon_env
+WL="$ROOT/.claude/ntfy-bus.wake.log"
+NTFY_HOME="$ROOT" bash "$DAEMON" > "$ROOT/d.out" 2>&1 & DP=$!
+sleep 2
+printf '{"event":"message","id":"","time":1,"title":"Dana->TestAgent: empty one","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":"","time":2,"title":"Dana->TestAgent: empty two","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":{"k":1},"time":3,"title":"Dana->TestAgent: object one","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":{"k":2},"time":4,"title":"Dana->TestAgent: object two","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":"plain","time":5,"title":"Dana->TestAgent: plain","message":"b"}\n' >> "$INBOX"
+printf '{"event":"message","id":"plain","time":5,"title":"Dana->TestAgent: plain","message":"b"}\n' >> "$INBOX"
+i=0; while [ $i -lt 10 ] && [ "$(wc -l < "$WL" 2>/dev/null | tr -d ' ')" != 5 ]; do sleep 1; i=$((i+1)); done
+sleep 1
+kill -TERM "$DP" 2>/dev/null; wait "$DP" 2>/dev/null
+assert_eq "five distinct messages logged, the replay once" "5" "$(wc -l < "$WL" 2>/dev/null | tr -d ' ')"
+assert_contains "second empty-id message was not suppressed" "$WL" 'empty two'
+assert_contains "second object-id message was not suppressed" "$WL" 'object two'
+assert_eq "plain id is unchanged as a key" "1" "$(grep -cxF -- 'plain' "$ROOT/.claude/ntfy-bus.seen-ids")"
+cleanup
+
 finish

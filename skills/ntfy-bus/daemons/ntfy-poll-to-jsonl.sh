@@ -177,6 +177,14 @@ RESP=$(curl -s --max-time 30 -u "${NTFY_USER}:${NTFY_PASS}" \
   "${ENDPOINT}/${TOPIC}/json?poll=1&since=${SINCE}") || { log "curl failed (since=$SINCE)"; exit 1; }
 
 touch "$JSONL"
+# A write that died mid-line (disk full, a kill) leaves the file without a
+# final newline, and the next append would glue a good message onto the torn
+# one, costing both. Close the line first so a torn write costs only itself
+# (issue #52). $(...) strips a trailing newline, so non-empty = no newline.
+if [ -s "$JSONL" ] && [ -n "$(tail -c 1 "$JSONL")" ]; then
+  printf '\n' >> "$JSONL"
+  log "inbox did not end in a newline (torn write?) — closed the line before appending"
+fi
 appended=0
 maxtime=$SINCE
 # `since` is inclusive, so the boundary message reappears each run — id dedup
@@ -193,7 +201,10 @@ while IFS= read -r line; do
   printf '%s\n' "$line" >> "$JSONL"
   appended=$((appended + 1))
   [ "$t" -gt "$maxtime" ] && maxtime=$t
-done < <(printf '%s\n' "$RESP" | jq -c 'select(.event == "message")' 2>/dev/null)
+done < <(printf '%s\n' "$RESP" | jq -R -c 'fromjson? | select(type == "object") | select(.event == "message")' 2>/dev/null)
+# -R + fromjson? (issue #52): one response line jq cannot parse must not stop
+# the parse. Unguarded, every message behind it was dropped, maxtime stopped
+# short of it, and the next poll re-fetched and stopped at the same place.
 
 echo "$maxtime" > "$STATE"
 log "ok since=$SINCE appended=$appended newmax=$maxtime"

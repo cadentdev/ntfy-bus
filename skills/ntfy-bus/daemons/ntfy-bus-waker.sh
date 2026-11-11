@@ -162,28 +162,19 @@ mark_seen() { bus_mark_seen "$1" "$SEEN" "$SEEN_CAP" "$SEEN_KEEP"; }
 # scan and the in-arm loop, so the two can never drift.
 #
 # Line-at-a-time on purpose (issue #52): -R hands jq each inbox line as a
-# string and `fromjson?` skips one that does not parse. Fed the raw stream, jq
-# STOPS at the first corrupt line — and with stderr discarded every message
-# after it was silently invisible until the line left the scan window. The
-# inbox is JSONL by contract (one compact object per line), so nothing valid
-# spans lines. Non-objects (a bare number, a string) are skipped the same way.
-#
-# scan_id: the ledger key. A missing/empty .id falls back to "time:title" —
-# the durable daemon's fallback — instead of the literal "null", which made
-# every id-less message after the first look already seen.
+# string and inbox_objects (lib/routing.sh) turns it into its message
+# object(s), skipping a line that does not parse. Fed the raw stream, jq STOPS
+# at the first corrupt line — and with stderr discarded every message after it
+# was silently invisible until the line left the scan window.
+# msg_key (same lib) is the ledger key, shared with the durable daemon.
 match_scan() {
   jq -R -r --arg me "$id_lc" --arg f "$FILTERS" --arg noise "$NOISE" "$BUS_ROUTING_DEFS"'
-      def scan_id:
-        (.id | if . == null or . == "" then null else tostring end)
-        // ((.time // .received // 0 | tostring) + ":" + (.title // "" | tostring))
-        | gsub("[\t\n\r\u001f]"; " ");
-      fromjson?
-      | select(type == "object")
+      inbox_objects
       | select(.event == "message")
       | select(addressed_to($f))
       | select(msg_sender != $me)
       | select((msg_sender | test($noise)) | not)
-      | "\(scan_id)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | gsub("[\t\n\r\u001f]"; " "))"' 2>/dev/null
+      | "\(msg_key)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | gsub("[\t\n\r\u001f]"; " "))"' 2>/dev/null
 }
 # Why US and not TAB: tab is IFS-whitespace, so `read` collapses an empty field
 # and shifts the rest left (a date read as an id). US is not whitespace, so

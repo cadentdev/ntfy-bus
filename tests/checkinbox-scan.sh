@@ -55,6 +55,16 @@ for sh in $SHELLS; do
   assert_true "output is still one compact JSON object per line" \
     sh -c 'printf "%s\n" "$1" | jq -e -s "length == 3 and all(.[]; type == \"object\")" >/dev/null' _ "$out"
   cleanup
+
+  echo "C3 ($sh): two messages glued on one line are both listed"
+  new_env; mkdir -p "$ROOT/.claude/skills"; ln -s "$SKILL_ROOT" "$ROOT/.claude/skills/ntfy-bus"
+  printf '{"event":"message","id":"g1","time":1,"title":"Dana->TestAgent: no newline","message":"b"}' >> "$INBOX"
+  printf '{"event":"message","id":"g2","time":2,"title":"Dana->ALL: glued on","message":"b"}\n' >> "$INBOX"
+  out=$(run_in "$sh")
+  assert_eq "both glued messages" "2" "$(printf '%s\n' "$out" | grep -c '"id"')"
+  cleanup
 done
+
+
 
 finish

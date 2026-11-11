@@ -12,7 +12,7 @@ that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
 ## [0.3.3] — 2026-11-11
 
-One bad inbox line, or one odd message id, no longer costs mail.
+One bad inbox line, or one odd message id, no longer costs the mail around it.
 
 ### Fixed
 - **A corrupt line in the inbox JSONL no longer hides every message after
@@ -21,23 +21,48 @@ One bad inbox line, or one odd message id, no longer costs mail.
   line it cannot parse; with stderr discarded, everything after that line was
   silently invisible — no wake, nothing listed — until the line scrolled out
   of the scan window (1000 lines for the waker, 200 for CheckInbox). Both now
-  read line by line (`jq -R` + `fromjson?`) and skip a line that is not a
-  JSON object. The bad line itself is skipped without a notice.
-- **A message id starting with `-` is now remembered as seen** (#52).
-  `bus_seen` (`lib/dedup.sh`) passed the id to `grep` without `--`, so it was
-  read as options: the id never matched and the message re-woke on every
-  arm, and an id of `-e` made grep read the caller's stdin, swallowing the
-  rest of that scan. Real ntfy ids are alphanumeric; this is hardening.
-- **Messages with no `.id` are each delivered once** (#52). The waker
-  recorded a missing id as the literal `null`, so the first id-less message
-  woke and every later one was suppressed. A missing or empty id now falls
-  back to `time:title`, the same key the durable daemon already uses.
+  read one line at a time through a shared `inbox_objects` def
+  (`lib/routing.sh`): a line that is not JSON costs only itself, and two
+  objects glued on one line (`{...}{...}`) are both read.
+- **The poller no longer stalls behind one bad response line**
+  (`daemons/ntfy-poll-to-jsonl.sh`). Same shape: every message after an
+  unparseable line was dropped, the saved position stopped short of it, and
+  the next poll re-fetched and stopped at the same place.
+- **The poller closes a torn line before appending.** An inbox left without a
+  final newline (disk full, a kill mid-write) had the next message glued onto
+  the fragment, costing both. It now ends the line first and logs that it did.
+- **A message id starting with `-` is handled as an id** (#52). `bus_seen`
+  (`lib/dedup.sh`) passed the id to `grep` without `--`, so it was read as
+  grep options: depending on the id and the grep, the message re-woke on
+  every arm or was wrongly treated as seen, and `-e` made grep read the
+  caller's stdin, swallowing the rest of that scan. Real ntfy ids are
+  alphanumeric; this is hardening.
+- **Messages with a missing or empty `.id` are no longer collapsed into one**
+  (#52). The session waker keyed a missing id as the literal `null`, and the
+  durable daemon keyed an empty id as `""` — either way the first such
+  message got through and every later one was suppressed. The daemon also
+  printed a non-string id over several lines, which then matched other ids.
+  Both now use one shared `msg_key` (`lib/routing.sh`): the `.id`, or
+  `time:title` when it is missing or empty. Two id-less messages with the
+  same second and the same title are still one message to the ledger.
 
 ### Changed
-- The waker and CheckInbox now require the inbox to be JSONL — one object per
-  line — which is what the poller and the LifeOS watcher both write. A
-  pretty-printed object spanning several lines was readable before and is
-  skipped now.
+- The waker and CheckInbox read the inbox strictly one line at a time. An
+  object pretty-printed over several lines was readable before and is skipped
+  now. The poller and the LifeOS watcher both write one object per line.
+- **Expect one catch-up wake after upgrading, if it applies to you.** A host
+  whose inbox has a corrupt line inside the scan window gets everything that
+  was hidden behind it as a single backlog wake on the next arm. Id-less
+  messages already in the window re-wake once, under their new key.
+
+### Known limits
+- A skipped line is skipped quietly. If it was a real message that `jq`
+  cannot parse (a torn write, a lone `\ud800` surrogate escape), nothing says
+  so; the raw file is the only record. Tracked in #59.
+- A glued line whose pieces contain `}{` inside a string, or a good message
+  glued onto a torn fragment already in the file, is not recovered.
+- The poller's id dedup is a substring match on the file, so the id inside a
+  torn fragment still counts as captured and that message is not re-fetched.
 
 ## [0.3.2] — 2026-11-10
 

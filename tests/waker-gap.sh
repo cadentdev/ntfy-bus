@@ -321,11 +321,12 @@ echo "T23: an id starting with '-' is remembered as seen (#52)"
 # never matched, and the message re-woke on every arm.
 new_env; emit id0 "Dana->ALL: backlog"
 arm "$ROOT/o1" 2
-# '-e' goes first: unfixed, grep takes the ledger path as its pattern and reads
-# stdin, which here is the rest of the scan — the messages behind it vanish.
+# Order matters. '--help' first: unfixed, grep prints its usage into the wake.
+# Then '-e': unfixed, grep takes the ledger path as its pattern and reads
+# stdin, which here is the rest of the scan — '-c4' behind it vanishes.
+emit "--help" "Dana->TestAgent: double dash id"
 emit "-e" "Dana->TestAgent: dash e id"
 emit "-c4" "Dana->TestAgent: dash id"
-emit "--help" "Dana->TestAgent: double dash id"
 arm "$ROOT/o2" 3
 assert_eq "all three delivered once" "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o2")"
 arm "$ROOT/o3" 2
@@ -353,6 +354,35 @@ assert_contains "null-id listed" "$ROOT/o3" 'Dana->TestAgent: null id'
 assert_false "the literal 'null' is not used as an id" in_ledger null
 arm "$ROOT/o4" 2
 expect "id-less messages do not re-wake" nowake "$ROOT/o4"
+cleanup
+
+echo "T25: two messages glued on one line are both delivered (review of PR #58)"
+# A write with no trailing newline followed by an append leaves "{...}{...}".
+# The raw-stream parse read both; a plain per-line fromjson reads neither.
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '{"event":"message","id":"g1","time":1756155600,"title":"Dana->TestAgent: no newline","message":"b"}' >> "$INBOX"
+printf '{"event":"message","id":"g2","time":1756155601,"title":"Dana->TestAgent: glued on","message":"b"}\n' >> "$INBOX"
+emit g3 "Dana->TestAgent: after the glued line"
+arm "$ROOT/o2" 3
+assert_eq "all three counted" "WAKE: 3 messages (3 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "first glued message listed" "$ROOT/o2" 'Dana->TestAgent: no newline'
+assert_contains "second glued message listed" "$ROOT/o2" 'Dana->TestAgent: glued on'
+assert_true "g1 in ledger" in_ledger g1
+assert_true "g2 in ledger" in_ledger g2
+cleanup
+
+echo "T26: a message left without a newline, then glued, is delivered once (review of PR #58)"
+new_env
+"$WAKER" TestAgent > "$ROOT/o" 2>&1 & P=$!
+sleep 2
+printf '{"event":"message","id":"q1","time":1756155600,"title":"Dana->TestAgent: no newline yet","message":"b"}' >> "$INBOX"
+sleep 2
+printf '{"event":"message","id":"q2","time":1756155601,"title":"Dana->TestAgent: glued live","message":"b"}\n' >> "$INBOX"
+sleep 3; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+assert_eq "both glued messages wake, once" "WAKE: 2 messages (0 backlog, 2 new)" "$(summary "$ROOT/o")"
+arm "$ROOT/o2" 2
+expect "neither re-wakes" nowake "$ROOT/o2"
 cleanup
 
 finish
