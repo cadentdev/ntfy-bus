@@ -46,6 +46,7 @@ source "$RESOLVER" >/dev/null 2>&1 || exit 0
 [ -n "${NTFY_CONFIG:-}" ] || exit 0
 
 WAKER="$SKILL_DIR/daemons/ntfy-bus-waker.sh"
+STATUS="$SKILL_DIR/bin/ntfy-waker-status.sh"
 
 # Identity = the canonical .agent_id (fallback recipient_filters[0] only for a
 # pre-backfill config). Used to locate this identity's inbox + pidfile and to
@@ -106,5 +107,15 @@ launch is untracked by the harness and cannot deliver a wake. After a wake fires
 fires within seconds and says 'backlog' is not a crash: it is every message
 that was waiting when you armed, reported once. Re-arm it; it then stays up
 until the next message arrives.
+
+To check later whether YOUR waker is still armed, run:
+    bash ${STATUS}
+That is the real check. For a quick look, a waker started by this version
+ends its command line with its identity:
+    ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh ${ID}\$'
+Do NOT conclude you are armed because some 'ntfy-bus-waker.sh' is running —
+other identities on this host run the same script. And do not stop a waker
+because it shows no name: one started by an older version shows none, and the
+status tool still tells you whose it is.
 EOF
 exit 0

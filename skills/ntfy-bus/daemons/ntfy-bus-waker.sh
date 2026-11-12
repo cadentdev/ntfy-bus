@@ -11,9 +11,11 @@
 # the model. Pair it with hooks/arm-bus-waker.sh (a SessionStart detector that
 # prompts the agent to (re)arm this via the wake-capable, harness-tracked path).
 #
-# Identity resolves from $1, else $NTFY_WAKER_IDENTITY, else the canonical
-# .agent_id in this cwd's bus config. It never guesses a hardcoded name — an
-# unresolvable identity is a loud FATAL (fail loudly, don't guess).
+# Identity is the canonical .agent_id in this cwd's bus config. $1 or
+# $NTFY_WAKER_IDENTITY may name it too, but only to AGREE with the config: the
+# inbox, pidfile and filters all come from the config, so a different name
+# would be a label on someone else's waker — a loud FATAL (issue #45). It never
+# guesses a hardcoded name; an unresolvable identity is a loud FATAL too.
 # The inbox path comes from the config's .inbox_jsonl (fail-loud, same key the
 # durable daemon follows — the two consumers can never watch different files);
 # the session pidfile derives from that configured path.
@@ -48,13 +50,18 @@
 #
 # Usage:  ntfy-bus-waker.sh [Identity]
 # Launch backgrounded from the agent's repo cwd so identity stays consistent.
+# Launched without an argument it re-execs itself once with the resolved
+# identity as $1 (same pid), so the process list shows whose waker it is:
+#   ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh Alice$'
+# That is a quick look, not proof — bin/ntfy-waker-status.sh is the real check.
 set -u
 
-# Identity resolution (fleet review, 2026-06-28): explicit arg/env wins
-# (the arm hook passes it per-cwd, by design); otherwise resolve the CANONICAL
-# .agent_id from this cwd's bus config — never a hardcoded default, which would
-# silently mislabel every non-default agent. .recipient_filters[0] is only a
-# pre-backfill fallback; it's a filter list, not an identity.
+# Identity resolution: the CANONICAL .agent_id from this cwd's bus config —
+# never a hardcoded default, which would silently mislabel every non-default
+# agent. The arm hook passes no argument; an explicit arg/env is accepted only
+# when it names that same identity (see the check below). Only a pre-backfill
+# config with no .agent_id takes the arg/env at its word, then falls back to
+# .recipient_filters[0] — a filter list, not an identity.
 # Config is required regardless of how identity arrives: the inbox path and
 # wake filters are per-host config, not code defaults (a recurring defect class here).
 #
@@ -84,10 +91,39 @@ if [ -z "${NTFY_CONFIG:-}" ] || [ ! -f "$NTFY_CONFIG" ]; then
   exit 1
 fi
 ME="${1:-${NTFY_WAKER_IDENTITY:-}}"
+CFG_ID=$(jq -r '.agent_id // empty' "$NTFY_CONFIG" 2>/dev/null)
+# A name that disagrees with the config must not start (issue #45). Everything
+# this waker watches — inbox, pidfile, filters — comes from the config, so a
+# different name would only relabel the config identity's waker: the named
+# agent would see "theirs" running while nothing watched their inbox, and the
+# real owner's self-sent filter would use the wrong name. Case is forgiven; the
+# config's spelling is the one that goes into argv.
+if [ -n "$ME" ] && [ -n "$CFG_ID" ]; then
+  if [ "$(printf '%s' "$ME" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$CFG_ID" | tr '[:upper:]' '[:lower:]')" ]; then
+    echo "FATAL: asked to run as '$ME', but the bus config for this directory ($NTFY_CONFIG) is '$CFG_ID'. The inbox and filters come from the config, so this would watch $CFG_ID's inbox under the wrong name. Launch it with no argument from the right directory (and unset NTFY_WAKER_IDENTITY)." >&2
+    exit 1
+  fi
+  ME="$CFG_ID"
+fi
 [ -n "$ME" ] || ME=$(jq -r '.agent_id // .recipient_filters[0] // empty' "$NTFY_CONFIG" 2>/dev/null)
 if [ -z "$ME" ]; then
   echo "FATAL: no identity (no arg, no \$NTFY_WAKER_IDENTITY, no resolvable .agent_id)" >&2
   exit 1
+fi
+# Put the identity in argv (issue #45). Every identity on a shared-$HOME host
+# otherwise runs the byte-identical command line, and `ps`/`pgrep` shows "a
+# waker" without saying whose — twice an agent took another identity's waker
+# for its own and sat silently unarmed. `exec` replaces this process in place:
+# SAME pid, so the harness keeps tracking it and its exit is still the wake.
+# This must stay ABOVE the pidfile claim and the EXIT trap (nothing stateful
+# has happened yet). It cannot loop: the second pass has $1 = $ME, the
+# highest-precedence source, so it resolves the same identity and skips this.
+# "$0", not the resolved path: keep the path the caller launched (the install
+# symlink), which is what people grep for. Only when run as a script: sourced,
+# $0 is the caller's shell, and exec'ing that would run the wrong thing (a
+# login shell's "-bash" even exits 0 silently — which a harness reads as a wake).
+if [ "${BASH_SOURCE[0]}" = "$0" ] && [ "${1:-}" != "$ME" ]; then
+  exec "${BASH:-bash}" "$0" "$ME"
 fi
 id_lc="$(echo "$ME" | tr '[:upper:]' '[:lower:]')"
 # Inbox comes from config — the SAME key the durable daemon follows, so the two

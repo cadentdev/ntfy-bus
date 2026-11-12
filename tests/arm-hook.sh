@@ -55,6 +55,24 @@ case "$out" in
 esac
 [ ! -f "${INBOX%.jsonl}.waker.pid" ] && pass "hook never wrote the pidfile" \
   || fail "hook never wrote the pidfile"
+# Issue #45: the check for "am I still armed?" must travel with the prompt
+# that creates the need for it, or the agent reaches for a bare ps/pgrep.
+case "$out" in
+  *"bin/ntfy-waker-status.sh"*) pass "status tool named in prompt" ;;
+  *) fail "status tool named in prompt" ;;
+esac
+tool=$(printf '%s\n' "$out" | grep -o '/[^ ]*bin/ntfy-waker-status.sh' | head -1)
+[ -n "$tool" ] && [ -f "$tool" ] && pass "the named status tool exists" \
+  || fail "the named status tool exists (got: '$tool')"
+# The whole line, anchor and quotes included: a prompt that renders a broken
+# or unanchored command is worse than none.
+want="    ps -ax -o pid=,command= | grep 'ntfy-bus-waker.sh TestAgent\$'"
+if printf '%s\n' "$out" | grep -qxF -- "$want"; then pass "prompt shows the exact identity-specific ps line"
+else fail "prompt shows the exact identity-specific ps line (want: $want)"; fi
+case "$out" in
+  *"older version shows none"*) pass "prompt warns an unnamed waker may still be yours" ;;
+  *) fail "prompt warns an unnamed waker may still be yours" ;;
+esac
 cleanup
 
 echo "A5: waker armed -> hook stays silent"
