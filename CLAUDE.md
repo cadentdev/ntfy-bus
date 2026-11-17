@@ -48,3 +48,22 @@ does and does not do" before touching anything near it.
 
 Run `bin/check.sh` (portability/doctrine gate) and `bash tests/run.sh`
 (behavior). Both must be green.
+
+## Draft PRs when another agent reviews
+
+Agents share one GitHub account, so GitHub cannot tell author from reviewer.
+A Draft is the only "not yet" signal it enforces: it can't merge until
+someone marks it Ready. PR #50 was merged before its review came back.
+
+1. If another agent must review, open a Draft:
+   `gh pr create --draft -R owner/repo`. Put "Review: X. Merge: maintainer." in the
+   body and send the review request on the bus — a Draft notifies no one.
+2. The **reviewer** approves, then runs `gh pr ready -R owner/repo`. Ready
+   means "reviewed, merge when you like."
+3. Changes needed → it stays a Draft; the reviewer says so on the bus. After
+   the fix, the author asks again.
+4. A PR only the maintainer reviews opens as a normal PR.
+5. The maintainer can still mark Ready when urgent: a speed bump, not a lock.
+
+Always pass `-R owner/repo` — in some checkouts `gh` defaults to an upstream
+fork. CI still runs on drafts.
