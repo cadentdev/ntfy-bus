@@ -10,6 +10,35 @@ change behavior (each such change is called out under **Security** or
 The root `VERSION` file is the source of truth; `bin/check.sh` §10 enforces
 that it, this file's top entry, and `.claude-plugin/plugin.json` agree.
 
+## [0.3.5] — 2026-11-17
+
+An inbox line nobody can read is no longer lost in silence.
+
+### Fixed
+- **The session waker reports an unreadable inbox line, once** (#59).
+  Since 0.3.3 a line jq cannot parse costs only itself, but it cost itself
+  silently, and it may be a message: a torn write, or a title cut mid-emoji
+  (a lone `\ud83d` escape, which jq rejects). Now such a line wakes the agent
+  with `UNREADABLE: N line(s) in <inbox> …` and the first 120 characters of
+  each. It is recorded in the waker's seen ledger under a content key, so the
+  next arm does not repeat it. A first arm takes old unreadable lines quietly,
+  like any backlog. When it is the only thing found, the summary reads
+  `WAKE: 0 messages (0 backlog, 0 new)`. Valid JSON that is not a message
+  (`42`, `null`) is still skipped without a notice. A last line with no
+  newline yet is left alone until it is complete, so a write in flight is
+  never called unreadable. NUL bytes (what a crash can leave) are stripped
+  before reading, so macOS's bash 3.2 no longer drops a line led by zeros.
+- **The poller re-fetches a message whose earlier write was torn** (#59).
+  Its dedup was a substring `grep` for the id, which also matched the torn
+  fragment, so the message counted as captured and was never fetched again.
+  An id now counts only if a line holding it parses to that message.
+- **CheckInbox counts unreadable lines** (#59), in a new "Unreadable lines"
+  step, and shows a `⚠` line under the messages when the count is above 0.
+
+### Added
+- `unreadable_line` in `lib/routing.sh`: the one definition of "this line
+  may be a lost message", shared by the waker and CheckInbox.
+
 ## [0.3.4] — 2026-11-11
 
 A running waker says whose it is.

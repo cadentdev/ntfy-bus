@@ -385,4 +385,100 @@ arm "$ROOT/o2" 2
 expect "neither re-wakes" nowake "$ROOT/o2"
 cleanup
 
+# --- an unreadable line leaves a trace, once (issue #59) ---
+# Since #52 a line jq cannot parse costs only itself — but it cost itself in
+# silence, and it may BE a message (a torn write, a lone surrogate escape).
+unreadable_notice() { grep -q 'UNREADABLE:' "$1"; }
+
+echo "T27: an unreadable line found at re-arm wakes, with its start shown, and only once (#59)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '%s\n' "$CORRUPT" >> "$INBOX"
+arm "$ROOT/o2" 3
+expect "the unreadable line alone wakes" wake "$ROOT/o2"
+assert_eq "no message counted" "WAKE: 0 messages (0 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "the notice names the count and the inbox" "$ROOT/o2" "UNREADABLE: 1 line in .*ntfy-inbox.testagent.jsonl"
+assert_contains "the start of the line is shown" "$ROOT/o2" '\{"event":"message","id":"bad1","tit'
+arm "$ROOT/o3" 2
+expect "the same line does not wake again" nowake "$ROOT/o3"
+cleanup
+
+echo "T28: an unreadable line arriving while armed wakes (#59)"
+new_env
+"$WAKER" TestAgent > "$ROOT/o" 2>&1 & P=$!
+sleep 2; printf '%s\n' "$CORRUPT" >> "$INBOX"; sleep 3
+kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+expect "live unreadable line wakes" wake "$ROOT/o"
+assert_true "with the notice" unreadable_notice "$ROOT/o"
+arm "$ROOT/o2" 2
+expect "the re-arm after it stays quiet" nowake "$ROOT/o2"
+cleanup
+
+echo "T29: first arm takes unreadable history quietly, like any backlog (#59)"
+new_env; emit h1 "Dana->TestAgent: history"
+printf '%s\n' "$CORRUPT" >> "$INBOX"
+arm "$ROOT/o1" 2
+expect "first arm silent" nowake "$ROOT/o1"
+assert_false "no notice on first arm" unreadable_notice "$ROOT/o1"
+arm "$ROOT/o2" 2
+expect "re-arm silent too" nowake "$ROOT/o2"
+cleanup
+
+echo "T30: messages and an unreadable line in one wake (#59)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+emit m1 "Dana->TestAgent: real one"
+printf '%s\n' "$CORRUPT" >> "$INBOX"
+emit m2 "Dana->ALL: real two"
+arm "$ROOT/o2" 3
+assert_eq "message count is unchanged by the bad line" "WAKE: 2 messages (2 backlog, 0 new)" "$(summary "$ROOT/o2")"
+assert_contains "the notice is there too" "$ROOT/o2" 'UNREADABLE: 1 line in'
+assert_eq "still exactly one WAKE line" "1" "$(grep -c '^WAKE:' "$ROOT/o2")"
+cleanup
+
+echo "T31: a lone surrogate escape (jq rejects it) is reported (#59)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '%s\n' '{"event":"message","id":"s1","time":1756155600,"title":"Dana->TestAgent: emoji cut \ud83d","message":"b"}' >> "$INBOX"
+arm "$ROOT/o2" 3
+assert_true "reported as unreadable" unreadable_notice "$ROOT/o2"
+cleanup
+
+echo "T32: a last line still being written is not reported until it is complete (#59)"
+# No final newline = a write may be in flight. Reporting it would mark a
+# half-seen line and call a healthy message unreadable.
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '{"event":"message","id":"p1","time":1756155600,"tit' >> "$INBOX"
+arm "$ROOT/o2" 2
+expect "no wake on the line in flight" nowake "$ROOT/o2"
+printf 'le":"Dana->TestAgent: finished now","message":"b"}\n' >> "$INBOX"
+arm "$ROOT/o3" 3
+assert_eq "the finished line is a message" "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o3")"
+assert_false "and not reported as unreadable" unreadable_notice "$ROOT/o3"
+cleanup
+
+echo "T34: zero bytes before a message do not hide it, on every bash (review of PR #65)"
+# A crash can leave a run of NULs. bash 3.2's `read` stops at a NUL, so the
+# line came through empty and vanished with no notice; bash 5 drops the NULs.
+# Run under each bash we can find; macOS /bin/bash is 3.2.
+for B in bash /bin/bash; do
+  command -v "$B" >/dev/null 2>&1 || continue
+  new_env; emit id0 "Dana->ALL: backlog"
+  "$B" "$WAKER" TestAgent > "$ROOT/o1" 2>&1 & P=$!; sleep 2; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+  printf '\0\0\0\0{"event":"message","id":"z1","time":1756155600,"title":"Dana->TestAgent: after zeros","message":"b"}\n' >> "$INBOX"
+  "$B" "$WAKER" TestAgent > "$ROOT/o2" 2>&1 & P=$!; sleep 3; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+  assert_eq "message behind NULs delivered ($B, $("$B" -c 'echo $BASH_VERSION'))" \
+    "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o2")"
+  cleanup
+done
+
+echo "T33: valid JSON that is not a message is skipped, not reported (#59)"
+new_env; emit id0 "Dana->ALL: backlog"
+arm "$ROOT/o1" 2
+printf '%s\n' '42' 'null' '[1,2]' '"a string"' '' '   ' >> "$INBOX"
+arm "$ROOT/o2" 2
+expect "no wake" nowake "$ROOT/o2"
+cleanup
+
 finish

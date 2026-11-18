@@ -48,6 +48,13 @@
 # may be old, may already be handled; each line carries its date). "new" =
 # landed while this arm was live.
 #
+# Unreadable lines (issue #59): a line jq cannot parse (unreadable_line in
+# lib/routing.sh) may be a lost message, so it wakes too, with an
+# "UNREADABLE:" notice showing the line's start. It goes in the same ledger
+# under a content key ("unreadable:<cksum>"), so it is reported ONCE, not on
+# every arm. A last line with no newline yet may still be being written; it
+# is not scanned until it is complete.
+#
 # Usage:  ntfy-bus-waker.sh [Identity]
 # Launch backgrounded from the agent's repo cwd so identity stays consistent.
 # Launched without an argument it re-execs itself once with the resolved
@@ -203,15 +210,43 @@ mark_seen() { bus_mark_seen "$1" "$SEEN" "$SEEN_CAP" "$SEEN_KEEP"; }
 # at the first corrupt line — and with stderr discarded every message after it
 # was silently invisible until the line left the scan window.
 # msg_key (same lib) is the ledger key, shared with the durable daemon.
+#
+# An unreadable line (#59) comes out as "unreadable:<whole line><US>unreadable
+# <US><its first 120 chars>"; rekey (below) turns the whole line into a short
+# content key. It cannot be routed, so it is reported whoever it was for.
 match_scan() {
   jq -R -r --arg me "$id_lc" --arg f "$FILTERS" --arg noise "$NOISE" "$BUS_ROUTING_DEFS"'
+      def fold: gsub("[\t\n\r\u001f]"; " ");
+      if unreadable_line then "unreadable:\(fold)\u001funreadable\u001f\(.[0:120] | fold)"
+      else
       inbox_objects
       | select(.event == "message")
       | select(addressed_to($f))
       | select(msg_sender != $me)
       | select((msg_sender | test($noise)) | not)
-      | "\(msg_key)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | gsub("[\t\n\r\u001f]"; " "))"' 2>/dev/null
+      | "\(msg_key)\u001f\(.time | if type == "number" then (try (todate | .[0:10]) catch "undated") else "undated" end)\u001f\(.title // "" | tostring | fold)"
+      end' 2>/dev/null
 }
+# Only newline-terminated lines: `read` fails on a last line with no newline,
+# so a line still being written is left for a later scan (the in-arm baseline
+# is a newline count, so it is picked up once complete).
+# NULs are stripped first: bash 3.2's `read` (macOS /bin/bash) stops at a NUL,
+# so a line led by the zeros a crash leaves came through empty and vanished
+# unreported; bash 5 drops them. tr makes every bash see the same line.
+complete_lines() { local l; tr -d '\000' | while IFS= read -r l; do printf '%s\n' "$l"; done; }
+# Replace an unreadable line's text with "unreadable:<crc>:<bytes>" (POSIX
+# cksum) so its ledger key is short and one line. Messages pass through.
+rekey() {
+  local k d t
+  while IFS="$SEP" read -r k d t; do
+    case "$k" in
+      unreadable:*) k="unreadable:$(printf '%s' "${k#unreadable:}" | cksum | tr ' ' ':')" ;;
+    esac
+    printf '%s\n' "$k$SEP$d$SEP$t"
+  done
+}
+# The whole pipeline every scan uses: stdin = raw inbox lines.
+scan() { complete_lines | match_scan | rekey; }
 # Why US and not TAB: tab is IFS-whitespace, so `read` collapses an empty field
 # and shifts the rest left (a date read as an id). US is not whitespace, so
 # fields stay put. Why try/catch on the date: an unconvertible .time (1e18)
@@ -230,7 +265,7 @@ case "$LIST_MAX" in ''|*[!0-9]*) LIST_MAX=20 ;; esac
 SEP="$(printf '\037')"
 NL='
 '
-# drain_and_wake KIND [PREFIX_LINE]   (KIND = backlog|new; stdin = match_scan)
+# drain_and_wake KIND [PREFIX_LINE]   (KIND = backlog|new; stdin = scan)
 # Retire EVERY addressed, unseen message on stdin in one wake. Returns 1 and
 # prints nothing when there is none; otherwise prints the summary + titles,
 # marks them all seen, and returns 0 (the caller exits — that exit is the wake).
@@ -238,15 +273,20 @@ NL='
 # (at-least-once) instead of losing mail that was marked but never shown.
 drain_and_wake() {
   local kind="$1" prefix="${2:-}" id day title n=0 ids="" list="" oldest="" backlog=0 new=0 noun=messages
+  local nbad=0 badlist="" lines=lines
   while IFS="$SEP" read -r id day title; do
     [ -z "$id" ] && continue
     bus_seen "$id" "$SEEN" && continue
     # Same id captured twice inside this scan: count it once.
     case "$NL$ids" in *"$NL$id$NL"*) continue ;; esac
+    ids="$ids$id$NL"
+    case "$id" in
+      unreadable:*) nbad=$((nbad+1)); badlist="$badlist    $title$NL"; continue ;;
+    esac
     [ "$n" -eq 0 ] && oldest="$day"
-    n=$((n+1)); ids="$ids$id$NL"; list="$list  [$day] $title$NL"
+    n=$((n+1)); list="$list  [$day] $title$NL"
   done
-  [ "$n" -gt 0 ] || return 1
+  [ "$n" -gt 0 ] || [ "$nbad" -gt 0 ] || return 1
   if [ "$kind" = backlog ]; then backlog=$n; else new=$n; fi
   [ "$n" -eq 1 ] && noun=message
   [ -n "$prefix" ] && echo "$prefix"
@@ -258,7 +298,12 @@ drain_and_wake() {
     echo "  ... $((n-LIST_MAX)) older not listed (oldest: $oldest) — all are within the last $GAP_WINDOW lines of $INBOX"
   fi
   printf '%s' "$list" | tail -n "$LIST_MAX"
-  if [ "$kind" = backlog ]; then
+  if [ "$nbad" -gt 0 ]; then
+    [ "$nbad" -eq 1 ] && lines=line
+    echo "  UNREADABLE: $nbad $lines in $INBOX could not be parsed — each may be a message that never arrived whole. Start of each (search the inbox for it):"
+    printf '%s' "$badlist" | tail -n "$LIST_MAX"
+  fi
+  if [ "$kind" = backlog ] && [ "$n" -gt 0 ]; then
     echo "  (backlog = found waiting at arm time, not live arrivals; check the dates — some may already be handled)"
   fi
   while IFS= read -r id; do
@@ -320,7 +365,7 @@ if [ ! -f "$SEEN" ]; then
   # the ledger even when nothing matched, so the NEXT arm is treated as a re-arm.
   while IFS="$SEP" read -r id _; do
     [ -n "$id" ] && mark_seen "$id"
-  done < <(tail -n "$GAP_WINDOW" "$INBOX" | match_scan)
+  done < <(tail -n "$GAP_WINDOW" "$INBOX" | scan)
   touch "$SEEN"
   armkind="first"
 else
@@ -331,7 +376,7 @@ else
   # queue behind a one-message-per-arm limit (#44, #49).
   if drain_and_wake backlog \
        "armed: identity=$ME inbox=$INBOX filters=$FILTERS re-arm gap-recovered pid=$$" \
-       < <(tail -n "$GAP_WINDOW" "$INBOX" | match_scan); then
+       < <(tail -n "$GAP_WINDOW" "$INBOX" | scan); then
     exit 0
   fi
   armkind="rearm"
@@ -357,7 +402,7 @@ while :; do
     # not already seen — all of them in one wake, not just the first. They are
     # marked seen before the exit so the re-arm that follows a genuine wake does
     # not re-fire on the same messages via its gap scan.
-    if drain_and_wake new < <(tail -n +"$((baseline+1))" "$INBOX" | match_scan); then
+    if drain_and_wake new < <(tail -n +"$((baseline+1))" "$INBOX" | scan); then
       exit 0
     fi
     baseline="$cur"

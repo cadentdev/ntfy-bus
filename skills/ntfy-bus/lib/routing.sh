@@ -7,6 +7,13 @@
 #   inbox_objects           -> the message object(s) on ONE inbox line. Run jq
 #                              with -R (each line arrives as a string) and start
 #                              the program with it. See "Reading an inbox".
+#   unreadable_line         -> true for an inbox line (-R string) that is not
+#                              blank, is not JSON, and holds no glued objects:
+#                              a torn write, a lone surrogate escape jq
+#                              rejects, a glued line that cannot be split. It
+#                              may be a lost message, so readers REPORT it
+#                              (issue #59). Valid JSON that is not a message
+#                              (42, null, []) is not unreadable, just skipped.
 #   msg_key                 -> the dedup key for a message: its .id, or
 #                              "time:title" when the id is missing or empty.
 #
@@ -58,6 +65,11 @@ def inbox_objects:
          end
      end)
   | select(type == "object");
+def unreadable_line:
+  . as $l
+  | ($l | test("\\S"))
+    and (([$l | fromjson?] | length) == 0)
+    and (([$l | inbox_objects] | length) == 0);
 def msg_key:
   ((.id | if . == null or . == "" then null else tostring end)
    // ((.time // .received // 0 | tostring) + ":" + (.title // "" | tostring)))

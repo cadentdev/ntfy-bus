@@ -65,4 +65,25 @@ assert_eq "exactly two lines" "2" "$(wc -l < "$INBOX" | tr -d ' ')"
 assert_false "no blank line" grep -q '^$' "$INBOX"
 cleanup
 
+echo "A5: a torn fragment holding a message's id does not block re-fetching it (#59)"
+# The dedup grep matched the id inside the fragment, so the message counted as
+# captured and was never fetched again.
+poll_env "$(msg t1 "$NOW")"
+printf '%s\n' '{"id":"t1","time":17' > "$INBOX"
+poll
+assert_eq "the full message is captured" "t1 " "$(ids)"
+poll
+assert_eq "and only once" "t1 " "$(ids)"
+cleanup
+
+echo "A6: many copies of one id still count as captured (review of PR #65)"
+# The dedup pipe used to end in `grep -q .`, which quits early; jq then died of
+# SIGPIPE and, under the poller's pipefail, "captured" read false — so a
+# duplicated inbox grew another copy on every poll.
+poll_env "$(msg dup1 "$NOW")"
+i=0; while [ "$i" -lt 5000 ]; do msg dup1 "$NOW"; i=$((i+1)); done > "$INBOX"
+poll
+assert_eq "no copy added" "5000" "$(grep -c '"id":"dup1"' "$INBOX")"
+cleanup
+
 finish
