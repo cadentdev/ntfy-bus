@@ -230,7 +230,10 @@ match_scan() {
 # Only newline-terminated lines: `read` fails on a last line with no newline,
 # so a line still being written is left for a later scan (the in-arm baseline
 # is a newline count, so it is picked up once complete).
-complete_lines() { local l; while IFS= read -r l; do printf '%s\n' "$l"; done; }
+# NULs are stripped first: bash 3.2's `read` (macOS /bin/bash) stops at a NUL,
+# so a line led by the zeros a crash leaves came through empty and vanished
+# unreported; bash 5 drops them. tr makes every bash see the same line.
+complete_lines() { local l; tr -d '\000' | while IFS= read -r l; do printf '%s\n' "$l"; done; }
 # Replace an unreadable line's text with "unreadable:<crc>:<bytes>" (POSIX
 # cksum) so its ledger key is short and one line. Messages pass through.
 rekey() {

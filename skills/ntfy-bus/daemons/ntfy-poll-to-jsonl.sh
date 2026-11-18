@@ -196,10 +196,13 @@ maxtime=$SINCE
 # repair it. inbox_objects comes from lib/routing.sh.
 # shellcheck source=/dev/null
 . "$LIB_DIR/routing.sh"
+# jq reads ALL its input, then answers by exit status. Nothing in the pipe may
+# quit early: a `grep -q` at the end (or jq's short-circuiting any/2) stops
+# reading, the writer before it dies of SIGPIPE, and under pipefail a
+# well-captured id reads as missing and is appended again — every poll.
 captured() {
   grep -F -- "\"id\":\"$1\"" "$JSONL" 2>/dev/null \
-    | jq -R -r --arg id "$1" "$BUS_ROUTING_DEFS"'inbox_objects | select(.id == $id) | .id' 2>/dev/null \
-    | grep -q .
+    | jq -n -R -e --arg id "$1" "$BUS_ROUTING_DEFS"'[inputs | inbox_objects | .id == $id] | any' >/dev/null 2>&1
 }
 while IFS= read -r line; do
   [ -z "$line" ] && continue

@@ -26,7 +26,8 @@ An inbox line nobody can read is no longer lost in silence.
   `WAKE: 0 messages (0 backlog, 0 new)`. Valid JSON that is not a message
   (`42`, `null`) is still skipped without a notice. A last line with no
   newline yet is left alone until it is complete, so a write in flight is
-  never called unreadable.
+  never called unreadable. NUL bytes (what a crash can leave) are stripped
+  before reading, so macOS's bash 3.2 no longer drops a line led by zeros.
 - **The poller re-fetches a message whose earlier write was torn** (#59).
   Its dedup was a substring `grep` for the id, which also matched the torn
   fragment, so the message counted as captured and was never fetched again.

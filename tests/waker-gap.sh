@@ -458,6 +458,21 @@ assert_eq "the finished line is a message" "WAKE: 1 message (1 backlog, 0 new)" 
 assert_false "and not reported as unreadable" unreadable_notice "$ROOT/o3"
 cleanup
 
+echo "T34: zero bytes before a message do not hide it, on every bash (review of PR #65)"
+# A crash can leave a run of NULs. bash 3.2's `read` stops at a NUL, so the
+# line came through empty and vanished with no notice; bash 5 drops the NULs.
+# Run under each bash we can find; macOS /bin/bash is 3.2.
+for B in bash /bin/bash; do
+  command -v "$B" >/dev/null 2>&1 || continue
+  new_env; emit id0 "Dana->ALL: backlog"
+  "$B" "$WAKER" TestAgent > "$ROOT/o1" 2>&1 & P=$!; sleep 2; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+  printf '\0\0\0\0{"event":"message","id":"z1","time":1756155600,"title":"Dana->TestAgent: after zeros","message":"b"}\n' >> "$INBOX"
+  "$B" "$WAKER" TestAgent > "$ROOT/o2" 2>&1 & P=$!; sleep 3; kill -TERM "$P" 2>/dev/null; wait "$P" 2>/dev/null
+  assert_eq "message behind NULs delivered ($B, $("$B" -c 'echo $BASH_VERSION'))" \
+    "WAKE: 1 message (1 backlog, 0 new)" "$(summary "$ROOT/o2")"
+  cleanup
+done
+
 echo "T33: valid JSON that is not a message is skipped, not reported (#59)"
 new_env; emit id0 "Dana->ALL: backlog"
 arm "$ROOT/o1" 2

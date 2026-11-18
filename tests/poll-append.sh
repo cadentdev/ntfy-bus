@@ -76,4 +76,14 @@ poll
 assert_eq "and only once" "t1 " "$(ids)"
 cleanup
 
+echo "A6: many copies of one id still count as captured (review of PR #65)"
+# The dedup pipe used to end in `grep -q .`, which quits early; jq then died of
+# SIGPIPE and, under the poller's pipefail, "captured" read false — so a
+# duplicated inbox grew another copy on every poll.
+poll_env "$(msg dup1 "$NOW")"
+i=0; while [ "$i" -lt 5000 ]; do msg dup1 "$NOW"; i=$((i+1)); done > "$INBOX"
+poll
+assert_eq "no copy added" "5000" "$(grep -c '"id":"dup1"' "$INBOX")"
+cleanup
+
 finish
