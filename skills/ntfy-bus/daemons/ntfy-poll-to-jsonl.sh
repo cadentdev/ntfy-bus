@@ -188,14 +188,25 @@ fi
 appended=0
 maxtime=$SINCE
 # `since` is inclusive, so the boundary message reappears each run — id dedup
-# (grep -F against the existing inbox) keeps the append idempotent. poll=1 never
+# against the existing inbox keeps the append idempotent. poll=1 never
 # returns keepalive/open events, so this file stays message-only and clean.
+# The dedup counts an id only if a line holding it PARSES to that message
+# (issue #59): grep -F finds candidate lines fast, then jq checks them. A torn
+# fragment that merely contains the id must not stop the re-fetch that would
+# repair it. inbox_objects comes from lib/routing.sh.
+# shellcheck source=/dev/null
+. "$LIB_DIR/routing.sh"
+captured() {
+  grep -F -- "\"id\":\"$1\"" "$JSONL" 2>/dev/null \
+    | jq -R -r --arg id "$1" "$BUS_ROUTING_DEFS"'inbox_objects | select(.id == $id) | .id' 2>/dev/null \
+    | grep -q .
+}
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   id=$(printf '%s' "$line" | jq -r '.id')
   t=$(printf '%s' "$line" | jq -r '.time')
   [ -z "$id" ] && continue
-  if grep -qF "\"id\":\"$id\"" "$JSONL" 2>/dev/null; then
+  if captured "$id"; then
     continue
   fi
   printf '%s\n' "$line" >> "$JSONL"

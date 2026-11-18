@@ -71,7 +71,23 @@ tail -n 200 "$INBOX_JSONL" \
     '
 ```
 
-Note: `-R` with `inbox_objects` (from `lib/routing.sh`) reads the inbox one line at a time and skips a line that is not valid JSON. Do not drop either: fed the raw stream, jq stops at the first corrupt line and every message after it silently disappears from this read (issue #52). A skipped line is skipped quietly — if a sender says they sent something you cannot see, look at the raw file.
+Note: `-R` with `inbox_objects` (from `lib/routing.sh`) reads the inbox one line at a time and skips a line that is not valid JSON. Do not drop either: fed the raw stream, jq stops at the first corrupt line and every message after it silently disappears from this read (issue #52). The skipped lines are counted next, so they are not lost in silence.
+
+### Unreadable lines
+
+Count the lines in the same window that could not be read at all (issue #59). Such a line may be a message that never arrived whole: a torn write, or a title cut mid-emoji that jq rejects.
+
+```bash
+# Same lookup as Step 1 — this snippet may run in a fresh shell.
+NTFY_STABLE="$HOME/.claude/skills/ntfy-bus"
+if [ -e "$NTFY_STABLE" ] || [ -L "$NTFY_STABLE" ]; then NTFY_SKILL_DIR="$NTFY_STABLE"; fi
+case "${NTFY_SKILL_DIR:-}" in /*) ;; *) unset NTFY_SKILL_DIR ;; esac
+. "${NTFY_SKILL_DIR:?must be the absolute path of the skill directory (see Finding the skill directory in SKILL.md)}/lib/routing.sh"
+tail -n 200 "$INBOX_JSONL" \
+  | jq -R -n "$BUS_ROUTING_DEFS"'[inputs | select(unreadable_line)] | length'
+```
+
+If the count is above 0, say so under the messages in Step 4 (see there). This repeats on every check while the line is in the window. That is fine: CheckInbox only runs when asked.
 
 Note: the `select(.title != null)` guard is required — JSONL watcher entries with `event != "message"` may have null titles even after the event filter (e.g. heartbeats that occasionally leak through), and `test()` against null throws `null (null) cannot be matched`. Same guard applies to the HTTP path in Step 3b.
 
@@ -105,6 +121,12 @@ Show each matched message as:
 ```
 
 Sort newest-first. Cap at 20 messages unless the user asks for more.
+
+If the unreadable count from Step 3a is above 0, add one line after the messages:
+
+```
+⚠ N unreadable line(s) in the last 200 lines of <inbox path> — each may be a lost message; look at the raw file.
+```
 
 ## Step 5: Suggest Next Action
 

@@ -29,6 +29,14 @@ run_in() { # shell -> the snippet's stdout (the matched messages)
 $STEP3A" 2>/dev/null )
 }
 
+COUNT=$(block_after "$WF/CheckInbox.md" '^### Unreadable lines')
+[ -n "$COUNT" ] || fail "no '### Unreadable lines' snippet in CheckInbox.md (#59)"
+count_in() { # shell -> the count snippet's stdout
+  ( cd "$ROOT" && env -u NTFY_SKILL_DIR -u CLAUDE_PROJECT_DIR HOME="$ROOT" NTFY_HOME="$ROOT" \
+      "$1" -c "$STEP1
+$COUNT" 2>/dev/null )
+}
+
 SHELLS="bash"
 command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 
@@ -62,6 +70,14 @@ for sh in $SHELLS; do
   printf '{"event":"message","id":"g2","time":2,"title":"Dana->ALL: glued on","message":"b"}\n' >> "$INBOX"
   out=$(run_in "$sh")
   assert_eq "both glued messages" "2" "$(printf '%s\n' "$out" | grep -c '"id"')"
+  cleanup
+
+  echo "C4 ($sh): the unreadable-line count reports torn lines, not junk JSON (#59)"
+  new_env; mkdir -p "$ROOT/.claude/skills"; ln -s "$SKILL_ROOT" "$ROOT/.claude/skills/ntfy-bus"
+  emit u1 "Dana->TestAgent: fine"
+  printf '%s\n' '{"event":"message","id":"bad1","tit' 'not json' '42' '' >> "$INBOX"
+  emit u2 "Dana->ALL: fine too"
+  assert_eq "two unreadable lines" "2" "$(count_in "$sh")"
   cleanup
 done
 

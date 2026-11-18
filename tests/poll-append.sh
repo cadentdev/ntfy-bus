@@ -65,4 +65,15 @@ assert_eq "exactly two lines" "2" "$(wc -l < "$INBOX" | tr -d ' ')"
 assert_false "no blank line" grep -q '^$' "$INBOX"
 cleanup
 
+echo "A5: a torn fragment holding a message's id does not block re-fetching it (#59)"
+# The dedup grep matched the id inside the fragment, so the message counted as
+# captured and was never fetched again.
+poll_env "$(msg t1 "$NOW")"
+printf '%s\n' '{"id":"t1","time":17' > "$INBOX"
+poll
+assert_eq "the full message is captured" "t1 " "$(ids)"
+poll
+assert_eq "and only once" "t1 " "$(ids)"
+cleanup
+
 finish
